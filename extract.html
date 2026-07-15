@@ -240,21 +240,31 @@ const NOTE_FIELDS = [
 function extractSection(text, headingRe) {
   if (!text) return "";
   const lines = text.split(/\r?\n/);
-  const headRe = new RegExp("^[\\s#*_>\\-]*" + headingRe + "\\s*(?:[*_]+)?\\s*(?:[:\\-–—]\\s*(.*))?$", "i");
+  // Real content has at least one letter or digit; markdown leftovers like
+  // "****", "> –", "---" don't, and must never be captured as notes.
+  const hasContent = l => /[A-Za-z0-9]/.test(l);
+  // Heading line: optional markdown decoration, the heading, then any mix of
+  // decoration and an optional ":"/"-" separator, then optional same-line text
+  // (m[1] = separator if present, m[2] = rest of line).
+  const headRe = new RegExp("^[\\s#*_>\\-]*" + headingRe + "[\\s*_]*([:\\-–—])?[\\s*_]*(.*)$", "i");
   // Another ALL-CAPS label (e.g. the other notes heading) ends the block.
   const headingLike = l => /^[\s#*_>\-]*[A-Z][A-Z0-9\s/&_\-]{2,40}[:\-–—]?\s*(?:[*_]+)?\s*$/.test(l) && /[A-Z]{3}/.test(l);
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(headRe);
     if (!m) continue;
+    const sep = m[1], rest = (m[2] || "").trim();
+    // Trailing words with no ":"/"-" separator means the heading is part of a
+    // sentence ("ORDER NOTES ARE BELOW") — not a heading line; keep scanning.
+    if (rest && hasContent(rest) && !sep) continue;
     const block = [];
-    const sameLine = (m[1] || "").trim();
-    if (sameLine) block.push(sameLine);
-    let j = i + 1;
-    while (j < lines.length && !lines[j].trim()) j++;   // skip blank lines under the heading
-    for (; j < lines.length; j++) {
+    if (rest && hasContent(rest)) block.push(rest);
+    for (let j = i + 1; j < lines.length; j++) {
       const t = lines[j].trim();
-      if (!t) break;                                     // blank line = end of block
       if (headingLike(lines[j])) break;                  // next section heading
+      if (!t || !hasContent(t)) {
+        if (block.length) break;                         // blank/decoration ends the block…
+        continue;                                        // …but is skipped before content starts
+      }
       block.push(t);
     }
     if (block.length) return block.join("\n");
@@ -403,15 +413,29 @@ async function loadCard(t, token) {
 
 async function downloadAttachment(cardId, att, token, as) {
   const hosted = /^https:\/\/(api\.)?trello\.com\//.test(att.url || "");
-  const url = hosted
-    ? `https://api.trello.com/1/cards/${cardId}/attachments/${att.id}/download/${encodeURIComponent(att.fileName || att.name || "file.pdf")}`
-    : att.url; // external link attachment — direct fetch (may be blocked by that host's CORS)
-  const headers = hosted
-    ? { Authorization: `OAuth oauth_consumer_key="${CFG.APP_KEY}", oauth_token="${token}"` }
-    : {};
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return as === "text" ? await res.text() : await res.arrayBuffer();
+  const authHeaders = { Authorization: `OAuth oauth_consumer_key="${CFG.APP_KEY}", oauth_token="${token}"` };
+  // Trello-hosted files are tried via both URL forms — the api.trello.com
+  // download route and the attachment's own url — because their redirect
+  // targets (and CORS behavior) have differed over time.
+  const tries = hosted
+    ? [
+        { url: `https://api.trello.com/1/cards/${cardId}/attachments/${att.id}/download/${encodeURIComponent(att.fileName || att.name || "file.pdf")}`, headers: authHeaders },
+        { url: att.url, headers: authHeaders },
+      ]
+    : [{ url: att.url, headers: {} }]; // external link — may be blocked by that host's CORS
+  const errs = [];
+  for (const t of tries) {
+    if (!t.url) continue;
+    try {
+      const res = await fetch(t.url, { headers: t.headers });
+      if (!res.ok) { errs.push(new URL(t.url).host + ": HTTP " + res.status); continue; }
+      return as === "text" ? await res.text() : await res.arrayBuffer();
+    } catch (e) {
+      errs.push(new URL(t.url).host + ": " + e.message);
+    }
+  }
+  console.error("attachment download failed", att, errs);
+  throw new Error(errs.join(" | "));
 }
 
 /* ── Dev mode (page opened outside Trello): local file testing ──────── */
