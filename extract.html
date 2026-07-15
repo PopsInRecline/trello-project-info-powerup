@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Project Info</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Worker is vendored same-origin: cross-origin workerSrc silently drops pdf.js
+     to its main-thread "fake worker", which can hang on complex sign drawings. -->
+<script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc=new URL("./js/vendor/pdf.worker.min.js",window.location.href).href;</script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<script src="./js/config.js"></script>
+<script src="./js/helpers.js"></script>
+<script src="./js/pi-module.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 10px 12px 12px;
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #172b4d; background: #fff;
+  }
+  .field { margin-bottom: 10px; }
+  label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: #5e6c84; margin-bottom: 3px;
+  }
+  .row { display: flex; gap: 6px; }
+  input[type=text] {
+    flex: 1; min-width: 0; padding: 6px 8px;
+    border: 1px solid #dfe1e6; border-radius: 4px; font-size: 14px;
+    color: #172b4d; background: #fafbfc;
+  }
+  input[type=text]:focus { outline: none; border-color: #4c9aff; background: #fff; }
+  textarea {
+    flex: 1; min-width: 0; padding: 6px 8px; resize: vertical;
+    border: 1px solid #dfe1e6; border-radius: 4px; font-size: 13px;
+    font-family: inherit; line-height: 1.4; color: #172b4d; background: #fafbfc;
+  }
+  textarea:focus { outline: none; border-color: #4c9aff; background: #fff; }
+  .copy-btn {
+    flex: 0 0 auto; padding: 6px 12px; border: none; border-radius: 4px;
+    background: #0079bf; color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; min-width: 64px;
+  }
+  .copy-btn:hover { background: #026aa7; }
+  .copy-btn.copied { background: #61bd4f; }
+  .copy-btn:disabled { background: #dfe1e6; color: #a5adba; cursor: default; }
+  .confidence {
+    font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+    letter-spacing: .05em;
+  }
+  .confidence.auto   { background: #e3fcef; color: #006644; }
+  .confidence.guess  { background: #fffae6; color: #974f0c; }
+  .confidence.meta, .confidence.vision { background: #deebff; color: #0747a6; }
+  .confidence.none   { background: #f4f5f7; color: #7a869a; }
+  .status {
+    font-size: 12px; color: #5e6c84; min-height: 17px; margin: 2px 0 8px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .status.error { color: #c9372c; }
+  select {
+    width: 100%; padding: 5px 6px; margin-bottom: 8px;
+    border: 1px solid #dfe1e6; border-radius: 4px; font-size: 12px;
+    color: #172b4d; background: #fafbfc;
+  }
+  .footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 4px; border-top: 1px solid #f4f5f7; padding-top: 8px;
+  }
+  .link-btn {
+    background: none; border: none; padding: 0; font-size: 11px;
+    color: #5e6c84; cursor: pointer; text-decoration: underline;
+  }
+  .link-btn:hover { color: #172b4d; }
+  .primary-btn {
+    padding: 6px 14px; border: none; border-radius: 4px; background: #0079bf;
+    color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .primary-btn:hover { background: #026aa7; }
+  .primary-btn:disabled { background: #dfe1e6; color: #a5adba; cursor: default; }
+  #authSection { text-align: center; padding: 18px 6px; }
+  #authSection p { font-size: 13px; color: #5e6c84; margin: 0 0 12px; }
+  #devSection { display: none; margin-bottom: 10px; }
+  #devDrop {
+    border: 2px dashed #dfe1e6; border-radius: 6px; padding: 18px 10px;
+    text-align: center; font-size: 12px; color: #7a869a; cursor: pointer;
+  }
+  #devDrop.drag { border-color: #4c9aff; color: #0747a6; background: #f7fbff; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="authSection" style="display:none">
+    <p>Authorize with Trello so the Power-Up can read this card's attachments. One-time per person.</p>
+    <button type="button" class="primary-btn" id="authBtn">Authorize Trello</button>
+  </div>
+
+  <div id="mainSection" style="display:none">
+    <div id="devSection">
+      <div id="devDrop">Dev mode (not inside Trello) — drop a PDF or .txt here, or click to choose</div>
+      <input type="file" id="devFile" accept=".pdf,.txt,application/pdf,text/plain" style="display:none">
+    </div>
+
+    <select id="attSelect" style="display:none" title="PDF attachment to extract from"></select>
+    <div class="status" id="piStatus">&nbsp;</div>
+
+    <div class="field">
+      <label>Project Name <span class="confidence none" id="piNameConf">—</span></label>
+      <div class="row">
+        <input type="text" id="piName" placeholder="e.g. Everbowl" autocomplete="off">
+        <button type="button" class="copy-btn" onclick="piCopy('piName',this)">Copy</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Project Address <span class="confidence none" id="piAddrConf">—</span></label>
+      <div class="row">
+        <input type="text" id="piAddr" placeholder="e.g. 123 Main St, Fort Lauderdale" autocomplete="off">
+        <button type="button" class="copy-btn" onclick="piCopy('piAddr',this)">Copy</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Order Notes <span class="confidence none" id="piOrderConf">—</span></label>
+      <div class="row">
+        <textarea id="piOrderNotes" rows="2" placeholder="Text under ORDER NOTES on the card or a .txt attachment"></textarea>
+        <button type="button" class="copy-btn" onclick="piCopy('piOrderNotes',this)">Copy</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Internal Notes <span class="confidence none" id="piInternalConf">—</span></label>
+      <div class="row">
+        <textarea id="piInternalNotes" rows="2" placeholder="Text under INTERNAL NOTES on the card or a .txt attachment"></textarea>
+        <button type="button" class="copy-btn" onclick="piCopy('piInternalNotes',this)">Copy</button>
+      </div>
+    </div>
+
+    <div class="footer">
+      <button type="button" class="link-btn" id="visionKeyBtn" title="Optional Anthropic API key for logo-only drawings OCR can't read">AI key</button>
+      <button type="button" class="primary-btn" id="reextractBtn" disabled>Re-extract</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const CFG = window.PI_POWERUP_CONFIG;
+
+/* ── Small UI helpers (mirrors of the merge tool's) ─────────────────── */
+function piSetStatus(msg, cls) {
+  const el = document.getElementById("piStatus");
+  el.textContent = msg || " ";
+  el.className = "status" + (cls === "error" ? " error" : "");
+  resizePopup();
+}
+function piSetConf(fieldId, level) {
+  const el = document.getElementById(fieldId);
+  el.className = "confidence " + (level || "none");
+  el.textContent = { auto: "AUTO", guess: "GUESS", none: "EMPTY", meta: "META", vision: "AI" }[level] || (level || "—").toUpperCase();
+}
+function piCopy(inputId, btn) {
+  const v = document.getElementById(inputId).value;
+  if (!v) return;
+  const done = () => {
+    btn.textContent = "Copied";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
+  };
+  // Clipboard API needs the clipboard-write permission policy, which Trello's
+  // popup iframe may not grant — fall back to execCommand inside the click.
+  const fallback = () => {
+    const inp = document.getElementById(inputId);
+    inp.focus(); inp.select();
+    try { document.execCommand("copy") && done(); } catch (_) {}
+    inp.setSelectionRange(0, 0); inp.blur();
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(v).then(done, fallback);
+  } else fallback();
+}
+document.getElementById("visionKeyBtn").onclick = () => {
+  const cur = localStorage.getItem("piVisionKey") || "";
+  const v = prompt(
+    "Anthropic API key for the vision fallback (reads logo-only drawings OCR can't).\n" +
+    "Stored only in this browser. Leave empty to disable.", cur);
+  if (v === null) return;
+  if (v.trim()) { localStorage.setItem("piVisionKey", v.trim()); piSetStatus("Vision fallback enabled.", ""); }
+  else { localStorage.removeItem("piVisionKey"); piSetStatus("Vision fallback disabled.", ""); }
+};
+
+/* ── Shared result → fields (same formatting path as the merge tool) ── */
+function populateFields(result) {
+  document.getElementById("piName").value = piTitleCase(cleanExtractedName(result.name || ""));
+  let displayAddr = "";
+  if (result.address) {
+    const parsed = PI.parseAddress(result.address);
+    displayAddr = parsed && parsed.formatted ? parsed.formatted : result.address;
+  }
+  document.getElementById("piAddr").value = displayAddr;
+  piSetConf("piNameConf", result.nameConf || "none");
+  piSetConf("piAddrConf", result.addrConf || "none");
+  if (result.name || result.address) {
+    const both = (result.nameConf === "auto" ? 1 : 0) + (result.addrConf === "auto" ? 1 : 0) === 2;
+    piSetStatus(both ? "✓ Both fields extracted from labels. Verify before use."
+                     : "✓ Best-guess extraction. Edit anything that looks wrong.", "");
+  } else {
+    piSetStatus("Could not find project info automatically. Enter manually.", "");
+  }
+}
+async function runExtraction(pdfBytes) {
+  // PI.extract copies via `new Uint8Array(bytes)` before each pdf.js call.
+  // That only copies when given a typed array — on a raw ArrayBuffer it makes
+  // a *view*, and pdf.js's worker transfer would detach the buffer under us.
+  if (pdfBytes instanceof ArrayBuffer) pdfBytes = new Uint8Array(pdfBytes);
+  const btn = document.getElementById("reextractBtn");
+  btn.disabled = true;
+  try {
+    const result = await PI.extract(pdfBytes, piSetStatus);
+    populateFields(result);
+  } catch (e) {
+    piSetStatus("Extraction error: " + e.message, "error");
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ── ORDER NOTES / INTERNAL NOTES section scraping ──────────────────── */
+// A "heading line" is the heading alone (allowing markdown decoration like
+// "## ", "**", ">", list dashes) with an optional ":"/"-" separator; text on
+// the same line after the separator counts as the section's first line.
+// The section is the text IMMEDIATELY under the heading: skip blank lines,
+// then take lines until the next blank line or the next heading-like line.
+const NOTE_FIELDS = [
+  { name: "ORDER NOTES",    re: "ORDER\\s*NOTES",    input: "piOrderNotes",    conf: "piOrderConf" },
+  { name: "INTERNAL NOTES", re: "INTERNAL\\s*NOTES", input: "piInternalNotes", conf: "piInternalConf" },
+];
+function extractSection(text, headingRe) {
+  if (!text) return "";
+  const lines = text.split(/\r?\n/);
+  const headRe = new RegExp("^[\\s#*_>\\-]*" + headingRe + "\\s*(?:[*_]+)?\\s*(?:[:\\-–—]\\s*(.*))?$", "i");
+  // Another ALL-CAPS label (e.g. the other notes heading) ends the block.
+  const headingLike = l => /^[\s#*_>\-]*[A-Z][A-Z0-9\s/&_\-]{2,40}[:\-–—]?\s*(?:[*_]+)?\s*$/.test(l) && /[A-Z]{3}/.test(l);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(headRe);
+    if (!m) continue;
+    const block = [];
+    const sameLine = (m[1] || "").trim();
+    if (sameLine) block.push(sameLine);
+    let j = i + 1;
+    while (j < lines.length && !lines[j].trim()) j++;   // skip blank lines under the heading
+    for (; j < lines.length; j++) {
+      const t = lines[j].trim();
+      if (!t) break;                                     // blank line = end of block
+      if (headingLike(lines[j])) break;                  // next section heading
+      block.push(t);
+    }
+    if (block.length) return block.join("\n");
+  }
+  return "";
+}
+function setNote(field, value, source) {
+  document.getElementById(field.input).value = value || "";
+  const el = document.getElementById(field.conf);
+  if (value) {
+    el.className = "confidence " + (source === "card" ? "auto" : "meta");
+    el.textContent = source === "card" ? "CARD" : "TXT";
+  } else {
+    el.className = "confidence none";
+    el.textContent = "EMPTY";
+  }
+}
+function extractNotesFromText(text, source) {
+  let found = 0;
+  for (const f of NOTE_FIELDS) {
+    const v = extractSection(text, f.re);
+    if (v) { setNote(f, v, source); found++; }
+  }
+  resizePopup();
+  return found;
+}
+// Card description first; any field still empty falls through to the
+// newest-first .txt attachments.
+async function extractNotes(card, cardId, token) {
+  const remaining = [];
+  for (const f of NOTE_FIELDS) {
+    const v = extractSection(card.desc || "", f.re);
+    setNote(f, v, "card");
+    if (!v) remaining.push(f);
+  }
+  resizePopup();
+  if (!remaining.length) return;
+  const isTxt = a => (a.mimeType === "text/plain") || /\.txt($|\?)/i.test(a.fileName || a.name || a.url || "");
+  const txts = (card.attachments || []).filter(isTxt)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  for (const att of txts) {
+    if (!remaining.length) break;
+    let text;
+    try { text = await downloadAttachment(cardId, att, token, "text"); }
+    catch (e) { console.warn("txt attachment download failed:", att.name, e); continue; }
+    for (let i = remaining.length - 1; i >= 0; i--) {
+      const v = extractSection(text, remaining[i].re);
+      if (v) { setNote(remaining[i], v, "txt"); remaining.splice(i, 1); }
+    }
+  }
+  resizePopup();
+}
+
+/* ── Trello popup sizing ────────────────────────────────────────────── */
+let _t = null;
+function resizePopup() { if (_t) _t.sizeTo("#app").catch(() => {}); }
+
+/* ── Trello mode ────────────────────────────────────────────────────── */
+async function trelloMain(t) {
+  _t = t;
+  const restApi = t.getRestApi();
+  let token = await restApi.getToken();
+  if (!token) {
+    document.getElementById("authSection").style.display = "";
+    resizePopup();
+    document.getElementById("authBtn").onclick = async () => {
+      try {
+        await restApi.authorize({ scope: "read", expiration: "never" });
+        token = await restApi.getToken();
+        document.getElementById("authSection").style.display = "none";
+        await loadCard(t, token);
+      } catch (e) {
+        piSetStatus("Authorization failed: " + e.message, "error");
+      }
+    };
+    return;
+  }
+  await loadCard(t, token);
+}
+
+async function loadCard(t, token) {
+  document.getElementById("mainSection").style.display = "";
+  resizePopup();
+  piSetStatus("Reading card…", "");
+  const cardId = t.getContext().card;
+  const auth = `key=${CFG.APP_KEY}&token=${token}`;
+  let card;
+  try {
+    const res = await fetch(`https://api.trello.com/1/cards/${cardId}?fields=name,desc&attachments=true&${auth}`);
+    if (!res.ok) throw new Error("Trello API " + res.status);
+    card = await res.json();
+  } catch (e) {
+    piSetStatus("Could not read card: " + e.message, "error");
+    return;
+  }
+
+  // Notes scraping runs in parallel with the PDF work — it only needs the
+  // description (already fetched) and any .txt attachments.
+  extractNotes(card, cardId, token).catch(e => console.warn("notes extraction failed:", e));
+
+  const isPdf = a => (a.mimeType === "application/pdf") || /\.pdf($|\?)/i.test(a.fileName || a.name || a.url || "");
+  // Newest first — in a revision workflow the latest drawing wins.
+  const pdfs = (card.attachments || []).filter(isPdf)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const sel = document.getElementById("attSelect");
+  const reBtn = document.getElementById("reextractBtn");
+
+  if (!pdfs.length) {
+    // No PDFs — fall back to scanning the card's own text.
+    piSetStatus("No PDF attachments — scanning card text…", "");
+    const lines = [card.name || "", ...(card.desc || "").split(/\r?\n/)].filter(Boolean);
+    populateFields(PI.extractFromLines(lines, []));
+    reBtn.disabled = false;
+    reBtn.onclick = () => populateFields(PI.extractFromLines(lines, []));
+    return;
+  }
+
+  if (pdfs.length > 1) {
+    sel.style.display = "";
+    sel.innerHTML = "";
+    pdfs.forEach((a, i) => {
+      const o = document.createElement("option");
+      o.value = i;
+      o.textContent = (a.fileName || a.name || "attachment") + "  (" + (a.date || "").slice(0, 10) + ")";
+      sel.appendChild(o);
+    });
+    resizePopup();
+  }
+
+  const extractAtt = async (att) => {
+    piSetStatus("Downloading " + (att.fileName || att.name || "attachment") + "…", "");
+    let bytes;
+    try {
+      bytes = await downloadAttachment(cardId, att, token);
+    } catch (e) {
+      piSetStatus("Download failed: " + e.message, "error");
+      return;
+    }
+    await runExtraction(bytes);
+  };
+  sel.onchange = () => extractAtt(pdfs[+sel.value]);
+  reBtn.onclick = () => extractAtt(pdfs[+(sel.style.display === "" ? sel.value : 0)]);
+  await extractAtt(pdfs[0]);
+}
+
+async function downloadAttachment(cardId, att, token, as) {
+  const hosted = /^https:\/\/(api\.)?trello\.com\//.test(att.url || "");
+  const url = hosted
+    ? `https://api.trello.com/1/cards/${cardId}/attachments/${att.id}/download/${encodeURIComponent(att.fileName || att.name || "file.pdf")}`
+    : att.url; // external link attachment — direct fetch (may be blocked by that host's CORS)
+  const headers = hosted
+    ? { Authorization: `OAuth oauth_consumer_key="${CFG.APP_KEY}", oauth_token="${token}"` }
+    : {};
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return as === "text" ? await res.text() : await res.arrayBuffer();
+}
+
+/* ── Dev mode (page opened outside Trello): local file testing ──────── */
+function devMain() {
+  document.getElementById("mainSection").style.display = "";
+  document.getElementById("devSection").style.display = "block";
+  const drop = document.getElementById("devDrop");
+  const file = document.getElementById("devFile");
+  const handle = async f => {
+    if (!f) return;
+    if (/\.txt$/i.test(f.name)) {
+      const n = extractNotesFromText(await f.text(), "txt");
+      piSetStatus(n ? "✓ Notes found in " + f.name : "No ORDER/INTERNAL NOTES headings in " + f.name, "");
+    } else {
+      runExtraction(await f.arrayBuffer());
+    }
+  };
+  drop.onclick = () => file.click();
+  file.onchange = () => handle(file.files[0]);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("drag"); };
+  drop.ondragleave = () => drop.classList.remove("drag");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("drag"); handle(e.dataTransfer.files[0]); };
+  document.getElementById("reextractBtn").onclick = () => handle(file.files[0]);
+  // ?pdf=<same-origin url> / ?txt=<same-origin url> — automated testing hooks
+  const p = new URLSearchParams(location.search).get("pdf");
+  if (p) fetch(p).then(r => r.arrayBuffer()).then(runExtraction)
+    .catch(e => piSetStatus("Test fetch failed: " + e.message, "error"));
+  const tx = new URLSearchParams(location.search).get("txt");
+  if (tx) fetch(tx).then(r => r.text()).then(s => extractNotesFromText(s, "txt"))
+    .catch(e => piSetStatus("Test fetch failed: " + e.message, "error"));
+}
+
+/* ── Boot ───────────────────────────────────────────────────────────── */
+(function boot() {
+  let t = null, ctx = null;
+  try {
+    t = TrelloPowerUp.iframe({ appKey: CFG.APP_KEY, appName: CFG.APP_NAME });
+    ctx = t.getContext();
+  } catch (_) { /* not inside Trello — dev mode */ }
+  if (t && ctx && ctx.card) trelloMain(t).catch(e => piSetStatus(e.message, "error"));
+  else devMain();
+})();
+</script>
+</body>
+</html>

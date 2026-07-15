@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Project Info Power-Up — connector</title>
+</head>
+<body>
+<!-- Connector page: Trello loads this invisibly on every board that has the
+     Power-Up enabled. Its only job is to register the card button. -->
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<script src="./js/config.js"></script>
+<script>
+TrelloPowerUp.initialize({
+  "card-buttons": function (t) {
+    return [{
+      icon: new URL("./icon.svg", window.location.href).href,
+      text: "Project Info",
+      callback: function (t) {
+        return t.popup({
+          title: "Project Info",
+          url: "./extract.html",
+          height: 500,
+        });
+      },
+    }];
+  },
+}, {
+  appKey: window.PI_POWERUP_CONFIG.APP_KEY,
+  appName: window.PI_POWERUP_CONFIG.APP_NAME,
+});
+</script>
+</body>
+</html>

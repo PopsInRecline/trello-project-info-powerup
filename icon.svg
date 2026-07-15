@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Trello recolors card-button icons; use a single #666 glyph on transparent. -->
+  <g fill="none" stroke="#666666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 4h8a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8z"/>
+    <path d="M9 4v4H5"/>
+    <path d="M9 13h6M9 17h6"/>
+  </g>
+</svg>
