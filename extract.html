@@ -414,12 +414,15 @@ async function loadCard(t, token) {
 async function downloadAttachment(cardId, att, token, as) {
   const hosted = /^https:\/\/(api\.)?trello\.com\//.test(att.url || "");
   const authHeaders = { Authorization: `OAuth oauth_consumer_key="${CFG.APP_KEY}", oauth_token="${token}"` };
-  // Trello-hosted files are tried via both URL forms — the api.trello.com
-  // download route and the attachment's own url — because their redirect
-  // targets (and CORS behavior) have differed over time.
+  // Trello's download route serves no CORS headers on the actual response,
+  // so browsers block direct fetches — route hosted files through the proxy
+  // worker (which forwards the Authorization header and adds CORS). Direct
+  // fetches remain as fallbacks in case the proxy is down or unconfigured.
+  const directUrl = `https://api.trello.com/1/cards/${cardId}/attachments/${att.id}/download/${encodeURIComponent(att.fileName || att.name || "file.pdf")}`;
   const tries = hosted
     ? [
-        { url: `https://api.trello.com/1/cards/${cardId}/attachments/${att.id}/download/${encodeURIComponent(att.fileName || att.name || "file.pdf")}`, headers: authHeaders },
+        ...(CFG.PROXY_URL ? [{ url: CFG.PROXY_URL + "/?url=" + encodeURIComponent(directUrl), headers: authHeaders }] : []),
+        { url: directUrl, headers: authHeaders },
         { url: att.url, headers: authHeaders },
       ]
     : [{ url: att.url, headers: {} }]; // external link — may be blocked by that host's CORS

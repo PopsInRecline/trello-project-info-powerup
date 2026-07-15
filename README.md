@@ -74,6 +74,18 @@ and paste an Anthropic API key. Per-browser (localStorage), same as the merge
 tool's vision fallback. Costs ~$0.005/page, only used when everything else
 comes up empty.
 
+## Attachment download proxy
+
+Trello's attachment download endpoint requires an OAuth Authorization header
+but returns **no CORS headers**, so browsers can never fetch attachments
+client-side (a documented limitation). `proxy-worker/` is a tiny Cloudflare
+Worker that forwards the download server-side and adds the CORS headers. It
+only accepts requests from this Power-Up's origin and only for Trello
+attachment-download URLs; the user's token passes through and is never stored.
+
+Deployed at the URL in `js/config.js` → `PROXY_URL`. To redeploy after a
+change: `npx wrangler deploy` from `proxy-worker/` (needs `wrangler login`).
+
 ## Files
 
 | File | Purpose |

@@ -6,4 +6,8 @@
 window.PI_POWERUP_CONFIG = {
   APP_KEY: "f48b59a96e4bd6ae25a4efebe31e45cb",
   APP_NAME: "Project Info Extractor",
+  // Trello's attachment download route returns no CORS headers, so browsers
+  // can't fetch it directly — this Cloudflare Worker (proxy-worker/) forwards
+  // the download server-side. Leave empty to attempt direct fetches only.
+  PROXY_URL: "https://trello-attachment-proxy.clangley00.workers.dev",
 };
