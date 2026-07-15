@@ -4,6 +4,6 @@
    The key is safe to ship in client code; each team member still has to
    authorize the Power-Up individually (their token stays in their browser). */
 window.PI_POWERUP_CONFIG = {
-  APP_KEY: "PASTE_YOUR_TRELLO_API_KEY_HERE",
+  APP_KEY: "f48b59a96e4bd6ae25a4efebe31e45cb",
   APP_NAME: "Project Info Extractor",
 };
