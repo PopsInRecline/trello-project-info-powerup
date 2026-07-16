@@ -45,6 +45,7 @@
   }
   .copy-btn:hover { background: #026aa7; }
   .copy-btn.copied { background: #61bd4f; }
+  .copy-btn.sm { padding: 6px 7px; font-size: 11px; min-width: 46px; }
   .copy-btn:disabled { background: #dfe1e6; color: #a5adba; cursor: default; }
   .confidence {
     font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
@@ -108,7 +109,8 @@
       <label>Project Name <span class="confidence none" id="piNameConf">—</span></label>
       <div class="row">
         <input type="text" id="piName" placeholder="e.g. Everbowl" autocomplete="off">
-        <button type="button" class="copy-btn" onclick="piCopy('piName',this)">Copy</button>
+        <button type="button" class="copy-btn sm" onclick="piCopy('piName',this)" title="Copy as Title Case">Copy</button>
+        <button type="button" class="copy-btn sm" onclick="piCopy('piName',this,'upper')" title="Copy as ALL-CAPS">COPY</button>
       </div>
     </div>
 
@@ -143,21 +145,27 @@ function piSetConf(fieldId, level) {
   el.className = "confidence " + (level || "none");
   el.textContent = { auto: "AUTO", guess: "GUESS", none: "EMPTY", meta: "META", vision: "AI" }[level] || (level || "—").toUpperCase();
 }
-function piCopy(inputId, btn) {
-  const v = document.getElementById(inputId).value;
+function piCopy(inputId, btn, transform) {
+  let v = document.getElementById(inputId).value;
   if (!v) return;
+  if (transform === "upper") v = v.toUpperCase();
+  const label = btn.textContent;
   const done = () => {
-    btn.textContent = "Copied";
+    btn.textContent = transform === "upper" ? "COPIED" : "Copied";
     btn.classList.add("copied");
-    setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1400);
+    setTimeout(() => { btn.textContent = label; btn.classList.remove("copied"); }, 1400);
   };
   // Clipboard API needs the clipboard-write permission policy, which Trello's
   // popup iframe may not grant — fall back to execCommand inside the click.
+  // A temp textarea carries the (possibly transformed) value.
   const fallback = () => {
-    const inp = document.getElementById(inputId);
-    inp.focus(); inp.select();
+    const ta = document.createElement("textarea");
+    ta.value = v;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
     try { document.execCommand("copy") && done(); } catch (_) {}
-    inp.setSelectionRange(0, 0); inp.blur();
+    ta.remove();
   };
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(v).then(done, fallback);
