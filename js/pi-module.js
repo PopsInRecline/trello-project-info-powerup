@@ -2303,7 +2303,10 @@ function extractFromLines(lines, words) {
   }
 
   // ── Public entry: extract from raw PDF bytes
-  async function extract(pdfBytes, onStatus) {
+  // opts.skipOcr: fast text-layer-only pass (no OCR, no vision) — used to
+  // sweep many attachments cheaply before falling back to the full pipeline.
+  async function extract(pdfBytes, onStatus, opts) {
+    opts = opts || {};
     onStatus && onStatus("Scanning for text…", "working");
     let data;
     try {
@@ -2316,7 +2319,7 @@ function extractFromLines(lines, words) {
     let words = data.words;
     const joined = lines.join(" ").replace(/\s+/g, " ").trim();
 
-    if (joined.length < 20 || data.charFragmented) {
+    if ((joined.length < 20 || data.charFragmented) && !opts.skipOcr) {
       // No usable text (image-only or char-fragmented PDF) — OCR fallback
       onStatus && onStatus(data.charFragmented ? "Image PDF detected — running OCR (first load takes ~15 s)…" : "No extractable text — running OCR (first load takes ~15 s)…", "working");
       try {
@@ -2347,7 +2350,7 @@ function extractFromLines(lines, words) {
     //       for those fields)
     const needsOcr = (result.address && !result.name) ||
                      (!result.address && result.addrConf === "none");
-    if (needsOcr) {
+    if (needsOcr && !opts.skipOcr) {
       const why = result.address
         ? "Found address — running OCR for project name…"
         : "No address found — running OCR to locate project info…";
@@ -2394,7 +2397,7 @@ function extractFromLines(lines, words) {
     // ── Vision fallback: logo-only pages defeat OCR entirely — if either
     //    field is still missing and the user has configured an API key,
     //    ask a vision model to read the rendered page.
-    if ((!result.name || !result.address)) {
+    if ((!result.name || !result.address) && !opts.skipOcr) {
       const vKey = (typeof localStorage !== "undefined" && localStorage.getItem("piVisionKey")) || "";
       if (vKey) {
         try {

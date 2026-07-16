@@ -98,11 +98,10 @@
 
   <div id="mainSection" style="display:none">
     <div id="devSection">
-      <div id="devDrop">Dev mode (not inside Trello) — drop a PDF or .txt here, or click to choose</div>
-      <input type="file" id="devFile" accept=".pdf,.txt,application/pdf,text/plain" style="display:none">
+      <div id="devDrop">Dev mode (not inside Trello) — drop PDFs / .txt files here (multiple = simulated card), or click to choose</div>
+      <input type="file" id="devFile" accept=".pdf,.txt,application/pdf,text/plain" multiple style="display:none">
     </div>
 
-    <select id="attSelect" style="display:none" title="PDF attachment to extract from"></select>
     <div class="status" id="piStatus">&nbsp;</div>
 
     <div class="field">
@@ -118,22 +117,6 @@
       <div class="row">
         <input type="text" id="piAddr" placeholder="e.g. 123 Main St, Fort Lauderdale" autocomplete="off">
         <button type="button" class="copy-btn" onclick="piCopy('piAddr',this)">Copy</button>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Order Notes <span class="confidence none" id="piOrderConf">—</span></label>
-      <div class="row">
-        <textarea id="piOrderNotes" rows="2" placeholder="Text under ORDER NOTES on the card or a .txt attachment"></textarea>
-        <button type="button" class="copy-btn" onclick="piCopy('piOrderNotes',this)">Copy</button>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Internal Notes <span class="confidence none" id="piInternalConf">—</span></label>
-      <div class="row">
-        <textarea id="piInternalNotes" rows="2" placeholder="Text under INTERNAL NOTES on the card or a .txt attachment"></textarea>
-        <button type="button" class="copy-btn" onclick="piCopy('piInternalNotes',this)">Copy</button>
       </div>
     </div>
 
@@ -227,16 +210,13 @@ async function runExtraction(pdfBytes) {
   }
 }
 
-/* ── ORDER NOTES / INTERNAL NOTES section scraping ──────────────────── */
+/* ── ORDER NOTES section scraping ───────────────────────────────────── */
 // A "heading line" is the heading alone (allowing markdown decoration like
 // "## ", "**", ">", list dashes) with an optional ":"/"-" separator; text on
 // the same line after the separator counts as the section's first line.
 // The section is the text IMMEDIATELY under the heading: skip blank lines,
 // then take lines until the next blank line or the next heading-like line.
-const NOTE_FIELDS = [
-  { name: "ORDER NOTES",    re: "ORDER\\s*NOTES",    input: "piOrderNotes",    conf: "piOrderConf" },
-  { name: "INTERNAL NOTES", re: "INTERNAL\\s*NOTES", input: "piInternalNotes", conf: "piInternalConf" },
-];
+// The extracted block feeds the name/address extractor as one more source.
 function extractSection(text, headingRe) {
   if (!text) return "";
   const lines = text.split(/\r?\n/);
@@ -271,51 +251,51 @@ function extractSection(text, headingRe) {
   }
   return "";
 }
-function setNote(field, value, source) {
-  document.getElementById(field.input).value = value || "";
-  const el = document.getElementById(field.conf);
-  if (value) {
-    el.className = "confidence " + (source === "card" ? "auto" : "meta");
-    el.textContent = source === "card" ? "CARD" : "TXT";
-  } else {
-    el.className = "confidence none";
-    el.textContent = "EMPTY";
-  }
+/* ── Multi-source merge ─────────────────────────────────────────────── */
+// Every source (PDF attachments, .txt attachments, the card's ORDER NOTES
+// block) produces a candidate name/address with a confidence level; the
+// best-ranked candidate per field wins. Ties keep the earlier source, so
+// source order = priority order (newest PDFs first, then .txt, then notes).
+const CONF_RANK = { auto: 4, guess: 3, meta: 2, vision: 2, none: 0 };
+function newBest() {
+  return { name: "", nameConf: "none", nameRank: 0, address: "", addrConf: "none", addrRank: 0 };
 }
-function extractNotesFromText(text, source) {
-  let found = 0;
-  for (const f of NOTE_FIELDS) {
-    const v = extractSection(text, f.re);
-    if (v) { setNote(f, v, source); found++; }
-  }
-  resizePopup();
-  return found;
+function mergeResult(best, r) {
+  if (!r) return;
+  const nr = (r.name && CONF_RANK[r.nameConf]) || 0;
+  const ar = (r.address && CONF_RANK[r.addrConf]) || 0;
+  if (nr > best.nameRank) { best.name = r.name; best.nameConf = r.nameConf; best.nameRank = nr; }
+  if (ar > best.addrRank) { best.address = r.address; best.addrConf = r.addrConf; best.addrRank = ar; }
 }
-// Card description first; any field still empty falls through to the
-// newest-first .txt attachments.
-async function extractNotes(card, cardId, token) {
-  const remaining = [];
-  for (const f of NOTE_FIELDS) {
-    const v = extractSection(card.desc || "", f.re);
-    setNote(f, v, "card");
-    if (!v) remaining.push(f);
+const textLines = t => (t || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+// sources: [{ kind: "pdf", label, getBytes } | { kind: "text", label, getText }]
+// Fast pass first — text layer only across every source. OCR (slow, ~15 s)
+// runs only if a field is still missing, and only on the 2 newest PDFs.
+async function runSources(sources) {
+  const best = newBest();
+  const pdfCache = [];
+  for (const s of sources) {
+    if (best.nameRank >= CONF_RANK.auto && best.addrRank >= CONF_RANK.auto) break;
+    piSetStatus("Scanning " + s.label + "…", "");
+    try {
+      if (s.kind === "pdf") {
+        const bytes = new Uint8Array(await s.getBytes());
+        pdfCache.push(bytes);
+        mergeResult(best, await PI.extract(bytes, piSetStatus, { skipOcr: true }));
+      } else {
+        const text = await s.getText();
+        if (text) mergeResult(best, PI.extractFromLines(textLines(text), []));
+      }
+    } catch (e) { console.warn("source failed:", s.label, e); }
   }
-  resizePopup();
-  if (!remaining.length) return;
-  const isTxt = a => (a.mimeType === "text/plain") || /\.txt($|\?)/i.test(a.fileName || a.name || a.url || "");
-  const txts = (card.attachments || []).filter(isTxt)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
-  for (const att of txts) {
-    if (!remaining.length) break;
-    let text;
-    try { text = await downloadAttachment(cardId, att, token, "text"); }
-    catch (e) { console.warn("txt attachment download failed:", att.name, e); continue; }
-    for (let i = remaining.length - 1; i >= 0; i--) {
-      const v = extractSection(text, remaining[i].re);
-      if (v) { setNote(remaining[i], v, "txt"); remaining.splice(i, 1); }
+  if (!best.name || !best.address) {
+    for (const bytes of pdfCache.slice(0, 2)) {
+      mergeResult(best, await PI.extract(bytes, piSetStatus));
+      if (best.name && best.address) break;
     }
   }
-  resizePopup();
+  return best;
 }
 
 /* ── Trello popup sizing ────────────────────────────────────────────── */
@@ -361,54 +341,37 @@ async function loadCard(t, token) {
     return;
   }
 
-  // Notes scraping runs in parallel with the PDF work — it only needs the
-  // description (already fetched) and any .txt attachments.
-  extractNotes(card, cardId, token).catch(e => console.warn("notes extraction failed:", e));
+  const byName = a => a.fileName || a.name || "attachment";
+  const isPdf = a => (a.mimeType === "application/pdf") || /\.pdf($|\?)/i.test(byName(a) + (a.url || ""));
+  const isTxt = a => (a.mimeType === "text/plain") || /\.txt($|\?)/i.test(byName(a) + (a.url || ""));
+  const newestFirst = (a, b) => new Date(b.date) - new Date(a.date);
+  const atts = card.attachments || [];
 
-  const isPdf = a => (a.mimeType === "application/pdf") || /\.pdf($|\?)/i.test(a.fileName || a.name || a.url || "");
-  // Newest first — in a revision workflow the latest drawing wins.
-  const pdfs = (card.attachments || []).filter(isPdf)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  // Source priority: PDFs (newest first), .txt attachments (newest first),
+  // then the text under ORDER NOTES in the card description.
+  const sources = [];
+  for (const a of atts.filter(isPdf).sort(newestFirst))
+    sources.push({ kind: "pdf", label: byName(a), getBytes: () => downloadAttachment(cardId, a, token) });
+  for (const a of atts.filter(isTxt).sort(newestFirst))
+    sources.push({ kind: "text", label: byName(a), getText: () => downloadAttachment(cardId, a, token, "text") });
+  const orderNotes = extractSection(card.desc || "", "ORDER\\s*NOTES");
+  if (orderNotes)
+    sources.push({ kind: "text", label: "ORDER NOTES", getText: async () => orderNotes });
 
-  const sel = document.getElementById("attSelect");
   const reBtn = document.getElementById("reextractBtn");
-
-  if (!pdfs.length) {
-    // No PDFs — fall back to scanning the card's own text.
-    piSetStatus("No PDF attachments — scanning card text…", "");
-    const lines = [card.name || "", ...(card.desc || "").split(/\r?\n/)].filter(Boolean);
-    populateFields(PI.extractFromLines(lines, []));
-    reBtn.disabled = false;
-    reBtn.onclick = () => populateFields(PI.extractFromLines(lines, []));
+  if (!sources.length) {
+    populateFields(newBest());
+    piSetStatus("No PDF/.txt attachments or ORDER NOTES on this card. Enter manually.", "");
     return;
   }
-
-  if (pdfs.length > 1) {
-    sel.style.display = "";
-    sel.innerHTML = "";
-    pdfs.forEach((a, i) => {
-      const o = document.createElement("option");
-      o.value = i;
-      o.textContent = (a.fileName || a.name || "attachment") + "  (" + (a.date || "").slice(0, 10) + ")";
-      sel.appendChild(o);
-    });
-    resizePopup();
-  }
-
-  const extractAtt = async (att) => {
-    piSetStatus("Downloading " + (att.fileName || att.name || "attachment") + "…", "");
-    let bytes;
-    try {
-      bytes = await downloadAttachment(cardId, att, token);
-    } catch (e) {
-      piSetStatus("Download failed: " + e.message, "error");
-      return;
-    }
-    await runExtraction(bytes);
+  const run = async () => {
+    reBtn.disabled = true;
+    try { populateFields(await runSources(sources)); }
+    catch (e) { piSetStatus("Extraction error: " + e.message, "error"); console.error(e); }
+    finally { reBtn.disabled = false; }
   };
-  sel.onchange = () => extractAtt(pdfs[+sel.value]);
-  reBtn.onclick = () => extractAtt(pdfs[+(sel.style.display === "" ? sel.value : 0)]);
-  await extractAtt(pdfs[0]);
+  reBtn.onclick = run;
+  await run();
 }
 
 async function downloadAttachment(cardId, att, token, as) {
@@ -447,27 +410,32 @@ function devMain() {
   document.getElementById("devSection").style.display = "block";
   const drop = document.getElementById("devDrop");
   const file = document.getElementById("devFile");
-  const handle = async f => {
-    if (!f) return;
-    if (/\.txt$/i.test(f.name)) {
-      const n = extractNotesFromText(await f.text(), "txt");
-      piSetStatus(n ? "✓ Notes found in " + f.name : "No ORDER/INTERNAL NOTES headings in " + f.name, "");
-    } else {
-      runExtraction(await f.arrayBuffer());
-    }
+  // Multiple files simulate a card: PDFs first, then .txt — same merge logic.
+  const handle = async fileList => {
+    const files = [...(fileList || [])];
+    if (!files.length) return;
+    const sources = [];
+    for (const f of files.filter(f => /\.pdf$/i.test(f.name)))
+      sources.push({ kind: "pdf", label: f.name, getBytes: () => f.arrayBuffer() });
+    for (const f of files.filter(f => /\.txt$/i.test(f.name)))
+      sources.push({ kind: "text", label: f.name, getText: () => f.text() });
+    if (!sources.length) { piSetStatus("Drop PDFs and/or .txt files.", ""); return; }
+    populateFields(await runSources(sources));
   };
   drop.onclick = () => file.click();
-  file.onchange = () => handle(file.files[0]);
+  file.onchange = () => handle(file.files);
   drop.ondragover = e => { e.preventDefault(); drop.classList.add("drag"); };
   drop.ondragleave = () => drop.classList.remove("drag");
-  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("drag"); handle(e.dataTransfer.files[0]); };
-  document.getElementById("reextractBtn").onclick = () => handle(file.files[0]);
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("drag"); handle(e.dataTransfer.files); };
+  document.getElementById("reextractBtn").onclick = () => handle(file.files);
   // ?pdf=<same-origin url> / ?txt=<same-origin url> — automated testing hooks
   const p = new URLSearchParams(location.search).get("pdf");
   if (p) fetch(p).then(r => r.arrayBuffer()).then(runExtraction)
     .catch(e => piSetStatus("Test fetch failed: " + e.message, "error"));
   const tx = new URLSearchParams(location.search).get("txt");
-  if (tx) fetch(tx).then(r => r.text()).then(s => extractNotesFromText(s, "txt"))
+  if (tx) fetch(tx).then(r => r.text())
+    .then(s => runSources([{ kind: "text", label: "test txt", getText: async () => s }]))
+    .then(populateFields)
     .catch(e => piSetStatus("Test fetch failed: " + e.message, "error"));
 }
 

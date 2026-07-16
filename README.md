@@ -1,10 +1,10 @@
 # Trello Project Info Power-Up
 
-Adds a **Project Info** button to every Trello card. One click downloads the
-card's PDF attachments, extracts the **Project Name** and **Project Address**
-using the same engine as the PDF Merge tool, and scrapes **Order Notes** and
-**Internal Notes** from the card itself — four fields, each with its own
-**Copy** button.
+Adds a **Project Info** button to every Trello card. One click scans every
+PDF attachment, every .txt attachment, and the text under **ORDER NOTES** in
+the card description, merges the candidates by confidence, and shows the two
+best guesses — **Project Name** and **Project Address** — each with its own
+**Copy** button. Extraction uses the same engine as the PDF Merge tool.
 
 The extraction engine (`js/pi-module.js`) shares its core with
 `PDF Merge Tool/eval/pi_extract.mjs` — output is formatted identically to the
@@ -15,20 +15,20 @@ merge tool's Project Info card (`piTitleCase` name, `Street – City` address).
 1. Open a card → click **Project Info** (right-side card buttons).
 2. First time only: click **Authorize Trello** (read-only token, stored in that
    person's browser).
-3. The newest PDF attachment is downloaded and scanned automatically:
-   text layer → OCR fallback (Tesseract, ~15 s first run per session) →
-   PDF metadata → optional AI vision fallback.
-4. Copy each field with its own button. If the card has several PDFs, a
-   dropdown lets you pick a different attachment; **Re-extract** re-runs it.
-5. Cards with **no** PDF attachments fall back to scanning the card title +
-   description text.
-6. **Order Notes / Internal Notes**: the popup looks for an `ORDER NOTES` /
-   `INTERNAL NOTES` heading in the **card description** first, then in any
-   **.txt attachments** (newest first), and grabs the text immediately under
-   the heading — up to the next blank line or the next heading. Markdown
-   decoration (`## `, `**bold**`), lowercase headings, and same-line text
-   (`ORDER NOTES: rush job`) all work. The chip shows where the text came
-   from (`CARD` or `TXT`). See `test-notes.txt` for the expected format.
+3. Every source is scanned and merged, in priority order:
+   - **PDF attachments** (newest first) — fast text-layer pass on all of them;
+   - **.txt attachments** (newest first) — run through the same line extractor;
+   - the text immediately under an **ORDER NOTES** heading in the card
+     description (markdown decoration, lowercase, and `ORDER NOTES: …`
+     same-line text all work).
+4. Each source yields name/address candidates with a confidence level
+   (label-based `AUTO` beats positional `GUESS` beats `META`/`AI`); the
+   best-ranked candidate per field wins, ties keep the higher-priority source.
+5. OCR (Tesseract, ~15 s first run) only runs when a field is still missing
+   after the fast pass, and only on the two newest PDFs. The optional AI
+   vision fallback stays last-resort.
+6. The two winners land in **Project Name** / **Project Address**, each with
+   its own **Copy** button. **Re-extract** re-runs the whole merge.
 
 ## One-time deployment (owner)
 
