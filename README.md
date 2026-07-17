@@ -57,8 +57,10 @@ Team members need zero setup — they just click the button and authorize once.
 is auto-regenerated from `PDF Merge Tool/eval/pi_extract.mjs` by
 `PDF Merge Tool/eval/sync_core_to_html.mjs` (this file is registered as a
 target there, alongside the two HTML tools). The daily retrain task refreshes
-it automatically — **but the hosted Power-Up only picks the change up after
-you commit & push this folder's repo.**
+it automatically, and the **TrelloPowerUp_CorePush** scheduled task
+(`auto_push_core.ps1`, registered by `register_auto_push_task.ps1`; triggers:
+logon +30 min and daily 12:00) commits & pushes the updated file so the hosted
+Power-Up redeploys without manual steps. Log: `logs/auto_push.log`.
 
 ## Local testing (dev mode)
 
