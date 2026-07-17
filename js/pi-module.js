@@ -162,7 +162,7 @@ function splitOnLastStreetSuffix(s) {
 // form fields ("BY: ...", "EC 13002612"), wind-load values ("535 psf"),
 // stamp text ("REPRODUCED CHANGED"). Cut at first all-caps tail or
 // engineering token.
-const ADDR_JUNK_TAIL = /\s*(?:,\s*)?(?:\bBY\s*:|\bRE?PRINT\b|\bSIGNATURE\b|\bDATE\b|\bEC\s*\d{4,}|\bES\s*\d{4,}|\bPE\s*#|\bCERT\s*AUTH|\bREPRODUCED\b|\bCHANGED\b|\(\s*PLEASE\b|TOTAL\s*SQ\s*FT|\bPSF\b|\bMPH\b|\bExposure\b|\bRisk\s+Category\b|\bASD\b|\bMunicipality\b|\bMonument\b|Channel\s+Letters?\b|\bDescription\b|\bRev\.?\s*\d|\bScale\b|\bSign\s+\d+\b|\b(?:New\s+)?(?:Front|Back|Side|Halo|Reverse)\s+Lit\b|\bDuplication\b|\bStrictly\s+Prohibited\b|\bSingle[\s-]+Sided\b|\bDouble[\s-]+Sided\b|\bProprietary\b|\bConfidential\b|\bMasonary\b|\bMasonry\b|\bLag\s+Bolt\b|\bBolt\s+Mounting\b|\bQuantity\b|\bBuilding\s+[A-Z]\b|\bCONDUIT\b|\bLED\s+MODULES?\b|\bPer\s+Letter\b|\bRetainers?\b|\bDivider\b|\bSpace\s+\d+\s+of\s+\d+\b|\bPhone\b|\bThru\s+to\s+Top\s+of\s+Cabinet\b|\d+[“”’\"]x\s*\d+[“”’\"]\s+Aluminum\b|0{4,}|\bPRINT\s*NAME\b)/i;
+const ADDR_JUNK_TAIL = /\s*(?:,\s*)?(?:\bBY\s*:|\bRE?PRINT\b|\bSIGNATURE\b|\bDATE\b|\bEC\s*\d{4,}|\bES\s*\d{4,}|\bPE\s*#|\bCERT\s*AUTH|\bREPRODUCED\b|\bCHANGED\b|\(\s*PLEASE\b|TOTAL\s*SQ\s*FT|\bPSF\b|\bMPH\b|\bExposure\b|\bRisk\s+Category\b|\bASD\b|\bMunicipality\b|\bMonument\b|Channel\s+Letters?\b|\bDescription\b|\bRev\.?\s*\d|\bScale\b|\bSign\s+\d+\b|\b(?:New\s+)?(?:Front|Back|Side|Halo|Reverse)\s+Lit\b|\bDuplication\b|\bStrictly\s+Prohibited\b|\bSingle[\s-]+Sided\b|\bDouble[\s-]+Sided\b|\bProprietary\b|\bConfidential\b|\bMasonary\b|\bMasonry\b|\bLag\s+Bolt\b|\bBolt\s+Mounting\b|\bQuantity\b|\bBuilding\s+[A-Z]\b|\bCONDUIT\b|\bLED\s+MODULES?\b|\bPer\s+Letter\b|\bRetainers?\b|\bDivider\b|\bSpace\s+\d+\s+of\s+\d+\b|\bPhone\b|\bThru\s+to\s+Top\s+of\s+Cabinet\b|\d+[“”’\"]x\s*\d+[“”’\"]\s+Aluminum\b|0{4,}|\bPRINT\s*NAME\b|\bCustom\s+(?:Height\s+|Width\s+)?P-?\d+\s+Pylon\s+Sign\b|\bApproved\s*:\s*#+)/i;
 const stripAddrTrailJunk = s => {
   const m = ADDR_JUNK_TAIL.exec(s);
   if (m && m.index > 5) return s.slice(0, m.index).trim().replace(/[\s,\-–—]+$/, "");
@@ -362,6 +362,14 @@ const KNOWN_CITIES = [
   "Doral",
   "Lady Lake",
   "Sanford",
+  "St Cloud",
+  "Crestview",
+  "Destin",
+  "Ft Walton",
+  "Immokalee",
+  "Jacksonville Beach",
+  "Niceville",
+  "Lakeland",
 ];
 const _squash = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const KNOWN_CITY_SQUASH = KNOWN_CITIES.map(c => [_squash(c), c]);
@@ -839,6 +847,10 @@ const CONTRACTOR = [
   /^Electrical$/i,
   // Standalone "Contact: Baz" sign-shop contact line outranking real name text; expected names not literally present in either file (housekeeping) — dVZdBnVPct.pdf, O7X9kB4SNr.pdf [corpus-frequency, 2 files]
   /^Contact:\s*Baz$/i,
+
+  // auto-populated by retraining task — 2026-07-16
+  // Standalone "THE FALLS SHOPPING CENTER" mall-name line outranking real tenant name text; expected names ("Express"/"Express Factory") not literally present in these files (housekeeping for future corpus files) — vkIkmWfSd2.pdf, q6HJSj0E2z.pdf, lBK9bunpoB.pdf, raroBnifS3.pdf, RWBThnM6xo.pdf [corpus-frequency, 5 files]
+  /^The\s+Falls\s+Shopping\s+Center$/i,
 ];
 const isContractor = s => CONTRACTOR.some(p => p.test(s));
 
@@ -1244,6 +1256,30 @@ const NAME_BOOST = [
   [/\bDevon\s+Self\s+Storage\b/i, "Devon Self Storage"],
   // Freeway Insurance — "Project: Freeway Insurance Revision Approvals" present, beat by revision-log junk; zero-collision verified — XxcLqQzVob.pdf [Category D]
   [/\bFreeway\s+Insurance\b/i, "Freeway Insurance"],
+
+  // auto-populated by retraining task — 2026-07-16
+  // Bermuda Isle — "Aberdeen" / "Bermuda Isle" present as clean standalone lines; current winner was "Pinmount Logo" project-label junk; zero-collision verified — 4zzEutuHuQ.pdf [Category D]
+  [/\bBermuda\s+Isle\b/i, "Bermuda Isle"],
+  // InstaLoan — "INSTALOAN" present multiple times (raceway text, quoted callout, anchor-schedule label); current winner was a dimension fragment; zero-collision verified — o0HeU5XjTh.pdf [Category D]
+  [/\bINSTALOAN\b/i, "InstaLoan"],
+  // Cajun Boil — "Design: CAJUN BOIL" present as clean text; current winner was letter-return spec boilerplate; zero-collision verified — SzrDelPq7I.pdf [Category D]
+  [/\bCAJUN\s+BOIL\b/i, "Cajun Boil"],
+  // Millennium Physician Group — "MILLENNIUM PHYSICIAN GROUP REVISION:" present as clean text; current winner was the elevation-label header line; zero-collision verified — wtfAffMuY0.pdf [Category D]
+  [/\bMillennium\s+Physician\s+Group\b/i, "Millennium Physician Group"],
+  // Magical Cleaners — "CUSTOMER: Magical Cleaners Orlando" and "FILE NAME: Magical Cleaners_Orlando..." present; current winner was a spaced-out "Si G N S" watermark fragment; zero-collision verified — 1uVa44yA3N.pdf [Category D]
+  [/\bMagical\s+Cleaners\b/i, "Magical Cleaners"],
+  // MIA Wait N Rest — Anicom Signs letterhead template splits the name across separate lines ("...Project: 26335 - MIA" / "ANICOM SIGNS, INC. WAIT N REST QTY:"); "WAIT N REST" is the reliable clean anchor; zero-collision verified, benefits 2 files — AYV5y8WAoy.pdf, J7cwGBZt3N.pdf [Category D]
+  [/\bWAIT\s+N\s+REST\b/i, "MIA Wait N Rest"],
+  // Double Knot — "Double Knot- Delray Beach WS" present as clean text; current winner was "way it will appear on" proof-approval boilerplate; zero-collision verified — EQ0PBdz3pt.pdf [Category D]
+  [/\bDouble\s+Knot\b/i, "Double Knot"],
+  // Dentists on Bonita Beach — "Dentists on Bonita Beach" present as a clean standalone line; current winner was a duplicate address line; zero-collision verified — 61SfCkvYNU.pdf [Category D]
+  [/\bDentists\s+on\s+Bonita\s+Beach\b/i, "Dentists on Bonita Beach"],
+  // Tech Travel — expected name not present as clean text anywhere in the Axe Signs letterhead, but survives as a substring of the email address "vivtechtravel@gmail.com"; exhausted chain (California Hq./Contact: Baz CONTRACTOR blocks over 2 prior runs did not fix this file since the real name isn't in unblocked text); zero-collision verified — dVZdBnVPct.pdf [Category C, exhausted-chain NAME_BOOST]
+  [/techtravel/i, "Tech Travel"],
+  // D'Lites Ice Cream — "D'Lites letters" / "D'Lites-Cone" present but "Ice Cream"/"Creamery" only as separate scattered tokens in heavily garbled OCR; anchored on the reliable "D'Lites" fragment; zero-collision verified — zIm4QumpkR.pdf [Category D]
+  [/D[‘’']?Lites/i, "D'Lites Ice Cream"],
+  // Chewy Vet Care — "Reproduction In Whole or in Part chewy VetCare SUITE 420" present (OCR merges Vet/Care with no space); current winner was a garbled revision-table fragment; zero-collision verified — LY6EdD0Mvs.pdf [Category D]
+  [/chewy\s*vet\s*care/i, "Chewy Vet Care"],
 ];
 
 const ADDR_ZIP = /\b\d{2,6}\s+[A-Za-z0-9][A-Za-z0-9 .,'#/\-’]{3,80}?,?\s*[A-Za-z][A-Za-z .\-]{2,}?(?:,|\s*[-\u2013]\s*|\s+(?=(?:[A-Z]{2}|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia)\.?,?\s*\d{5}))\s*(?:[A-Z]{2}\.?|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia),?\s*\d{5}(?:-\d{4})?/i;
@@ -1407,6 +1443,21 @@ const ADDR_BLOCK_KEYS = new Set([
   "15 flexible non",
   "2026 after installation",
   "2026 this drawing",
+  "00 ug ses",
+  "090 aluminum cut",
+  "10 total facade",
+  "1607 nw 79th",
+  "2023 8th ed",
+  "2023 8th edition",
+  "2631 n 31st",
+  "3260 nw 23rd",
+  "411 7th st",
+  "65 pylon sign",
+  "063 letters pre",
+  "040 letters aluminum",
+  "10 primary power",
+  "040 aluminum back",
+  "26 contained herein"
 ]);
 const addrBlockKey = v => {
   const n = String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
