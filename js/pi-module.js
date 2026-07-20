@@ -492,7 +492,8 @@ function parseAddress(raw) {
 // ── Address-finding heuristics ────────────────────────────────────────
 const NAME_LABELS = [
   /\b(?:project|client|account)\s*(?:name)?\s*[:\-]/gi,
-  /\b(?:customer|company)\s*[:\-]/gi,
+  // "(?:name)?" so "Customer Name: Serhant" matches — HvJnQMRzU3.pdf
+  /\b(?:customer|company)\s*(?:name)?\s*[:\-]/gi,
   /\bcustomer\s+info(?:rmation)?\b/gi,   // "CUSTOMER INFO Tommy's Express..."
   /^name\s*[:\-]/gi,                     // bare "NAME:" at line start
   /\bJOB\s*(?:NAME|TITLE)?\s*[:\-]/gi,
@@ -504,7 +505,7 @@ const ADDR_LABELS = [
   /\bADDRESS\b(?!\s*OF)/gi,
 ];
 const ANY_LABEL = /\b(project\s*address|install\s*address|site\s*address|install\s*location|jobsite|project|customer|client|account|job|location|address|owner|mailing|folio|date|drawn|designer|scale|revision|page|sheet|elevation|drawing|north|south|east|west|rev\.?\s*#|frontage|suite\s+frontage|approved|rejected|signature|telephone|phone|email|copy|spelling|color|layout|landlord|by\b|artwork)\s*[:\-]?/i;
-const SPATIAL_NAME_RX  = /^(customer|client|project(?:\s*name)?|job(?:\s*name|\s*title)?|account|company)\s*:?\s*$/i;
+const SPATIAL_NAME_RX  = /^(customer(?:\s*name)?|client|project(?:\s*name)?|job(?:\s*name|\s*title)?|account|company)\s*:?\s*$/i;
 const SPATIAL_ADDR_RX  = /^(address|(?:project|install|site|location)\s*address|jobsite|install\s*location|job\s*site|location)\s*:?\s*$/i;
 const SPATIAL_LABEL_RX = /^(dates?|layout|customer|client|project|job|account|address|email|phone|telephone|fax|url|website|approval|landlord|drawn|designer|scale|revision|sheet|ownership|owner|contractor|install|contact|parcel|zoning|proposed|notes?|copy|quote|page|sales|salesperson|color|location|business|drawing|file|hardware|qty|spec|specification|frontage)\b/i;
 
@@ -544,6 +545,11 @@ const CONTRACTOR = [
   /^Single\s+Sided/i, /^Double\s+Sided/i, /^LED\s+Lighting/i,
   // Scope-of-work phrases (these are descriptive of the SIGN, not the project name)
   /^(Side\s*Lit|Front\s*Lit|Back\s*Lit|Halo\s*Lit|Reverse\s*Lit)/i,
+  // Sign-type modifier + "Channel Letter(s)" is a sign type, never a project
+  // name — "PROJECT: REVERSE CHANNEL LETTERS" where the real name sits under
+  // "Customer Name:" — HvJnQMRzU3.pdf. Start-anchored: "<Business> - Raceway
+  // Mount Channel Letter" candidates must survive (Wswq7Xw2Kv.pdf).
+  /^(?:Reverse|Illuminated|Non[-\s]?Illuminated|LED|Open\s+Face|Closed\s+Face)\s+(?:\S+\s+){0,2}Channel\s+Letters?\b/i,
   /^Face\s*\/\s*Halo/i, /^Halo[-\s]Lit\s+Channel/i,
   /^Install\s+New\s+(Illuminated|Halo|Front|Back|Channel|Reverse)/i,
   /^(Add|Install|Replace|Remove)\s+\S.*\s+(Halo|Front|Back|Lit|Channel|Sign|Letter)/i,
