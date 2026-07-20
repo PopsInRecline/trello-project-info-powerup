@@ -118,12 +118,16 @@ const expandCity = (city) => {
   return out.replace(/\s+/g, " ").trim();
 };
 
-const SUITE_KEYWORDS = "Suite|Ste\\.?|Unit|Bldg\\.?|Building|Apt\\.?|Apartment|Floor|Fl\\.?|Rm\\.?|Room|Lot|#";
+// NOTE: \b prefix + (?![A-Za-z]) suffix so keywords only match as whole words —
+// without them "Ste"/"Fl"/"Lot" match INSIDE city names (Homestead → "Home",
+// Charlotte → "Char", Florida City → "City"). "#" stays outside the \b group
+// since it has no word characters. Digits may still follow directly ("Ste117").
+const SUITE_KEYWORDS = "\\b(?:Suite|Ste\\.?|Unit|Bldg\\.?|Building|Apt\\.?|Apartment|Floor|Fl\\.?|Rm\\.?|Room|Lot)(?![A-Za-z])|#";
 const SUITE_RANGE = new RegExp(
   `,?\\s*(?:${SUITE_KEYWORDS})\\s*[A-Za-z0-9]+\\s*[\\-\\u2013\\u2014]\\s*(?:(?:${SUITE_KEYWORDS})\\s*)?[A-Za-z0-9]+`,
   "gi"
 );
-const SUITE_TOKENS = /,?\s*(?:Suite|Ste\.?|Unit|Bldg\.?|Building|Apt\.?|Apartment|Floor|Fl\.?|Rm\.?|Room|Lot)\s*[A-Za-z0-9\-]+/gi;
+const SUITE_TOKENS = /,?\s*\b(?:Suite|Ste\.?|Unit|Bldg\.?|Building|Apt\.?|Apartment|Floor|Fl\.?|Rm\.?|Room|Lot)(?![A-Za-z])\s*[A-Za-z0-9\-]+/gi;
 // "Space #460" / "Space #C" — retail suite designator; only strip when followed by # or digit
 const SPACE_SUITE = /,?\s*\bSpace\s*#\s*[A-Za-z0-9\-]+/gi;
 const HASH_SUITE = /,?\s*#\s*[A-Za-z0-9\-]+/g;
@@ -370,6 +374,8 @@ const KNOWN_CITIES = [
   "Jacksonville Beach",
   "Niceville",
   "Lakeland",
+  "Clewiston",
+  "Marathon",
 ];
 const _squash = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const KNOWN_CITY_SQUASH = KNOWN_CITIES.map(c => [_squash(c), c]);
@@ -434,11 +440,22 @@ function parseAddress(raw) {
   if (parts.length === 0) return null;
   let city = "", street = "";
   if (parts.length === 1) {
+    // Fused title-block columns can glue a ZIP onto a bare city: e.g.
+    // "Doral, FL 33172 Lake Worth, FL 33463" → after zip/state stripping,
+    // "33172 Lake Worth". A leading FL-range zip (32000–34999) followed by
+    // ONLY a known city (no street suffix) is zip + city, not a street —
+    // without this the whole string is treated as a street and city is lost.
+    const zipCityM = /^(3[2-4]\d{3})\s+(.+)$/.exec(parts[0]);
+    if (zipCityM && !STREET_SUFFIX_RX.test(zipCityM[2]) && canonCity(zipCityM[2])) {
+      city = zipCityM[2];
+      street = "";
+    } else {
     // Try to split on the LAST street suffix — handles "201 E Boynton
     // Beach Blvd Boynton Beach" where there's no comma.
     const split = splitOnLastStreetSuffix(parts[0]);
     if (split) { [street, city] = split; }
     else street = parts[0];
+    }
   } else {
     city = parts.pop();
     street = parts.join(", ");
@@ -488,8 +505,8 @@ const ADDR_LABELS = [
 ];
 const ANY_LABEL = /\b(project\s*address|install\s*address|site\s*address|install\s*location|jobsite|project|customer|client|account|job|location|address|owner|mailing|folio|date|drawn|designer|scale|revision|page|sheet|elevation|drawing|north|south|east|west|rev\.?\s*#|frontage|suite\s+frontage|approved|rejected|signature|telephone|phone|email|copy|spelling|color|layout|landlord|by\b|artwork)\s*[:\-]?/i;
 const SPATIAL_NAME_RX  = /^(customer|client|project(?:\s*name)?|job(?:\s*name|\s*title)?|account|company)\s*:?\s*$/i;
-const SPATIAL_ADDR_RX  = /^(address|project\s*address|install\s*address|site\s*address|jobsite|install\s*location|job\s*site|location)\s*:?\s*$/i;
-const SPATIAL_LABEL_RX = /^(date|customer|client|project|job|account|address|email|phone|telephone|fax|url|website|approval|landlord|drawn|designer|scale|revision|sheet|ownership|owner|contractor|install|contact|parcel|zoning|proposed|notes?|copy|quote|page|sales|salesperson|color|location|business|drawing|file|hardware|qty|spec|specification|frontage)\b/i;
+const SPATIAL_ADDR_RX  = /^(address|(?:project|install|site|location)\s*address|jobsite|install\s*location|job\s*site|location)\s*:?\s*$/i;
+const SPATIAL_LABEL_RX = /^(dates?|layout|customer|client|project|job|account|address|email|phone|telephone|fax|url|website|approval|landlord|drawn|designer|scale|revision|sheet|ownership|owner|contractor|install|contact|parcel|zoning|proposed|notes?|copy|quote|page|sales|salesperson|color|location|business|drawing|file|hardware|qty|spec|specification|frontage)\b/i;
 
 const CONTRACTOR = [
   /©/i, /copyright/i, /\bLIC\.?\s*#/i, /license\s*#/i,
@@ -851,6 +868,10 @@ const CONTRACTOR = [
   // auto-populated by retraining task — 2026-07-16
   // Standalone "THE FALLS SHOPPING CENTER" mall-name line outranking real tenant name text; expected names ("Express"/"Express Factory") not literally present in these files (housekeeping for future corpus files) — vkIkmWfSd2.pdf, q6HJSj0E2z.pdf, lBK9bunpoB.pdf, raroBnifS3.pdf, RWBThnM6xo.pdf [corpus-frequency, 5 files]
   /^The\s+Falls\s+Shopping\s+Center$/i,
+
+  // auto-populated by retraining task — 2026-07-20
+  // Standalone "Monarch" (rendering-firm watermark) outranking real project names; zero-collision verified across corpus — 329919 APEX - Marathon - 351076_DRAWINGS.pdf, 329656 Monument Sign Cabinet Replacment_DRAWING.pdf [corpus-frequency, 2 files]
+  /^Monarch$/i,
 ];
 const isContractor = s => CONTRACTOR.some(p => p.test(s));
 
@@ -1280,6 +1301,11 @@ const NAME_BOOST = [
   [/D[‘’']?Lites/i, "D'Lites Ice Cream"],
   // Chewy Vet Care — "Reproduction In Whole or in Part chewy VetCare SUITE 420" present (OCR merges Vet/Care with no space); current winner was a garbled revision-table fragment; zero-collision verified — LY6EdD0Mvs.pdf [Category D]
   [/chewy\s*vet\s*care/i, "Chewy Vet Care"],
+
+  // auto-populated by retraining task — 2026-07-20
+  // NOTE: WorkBay NAME_BOOST attempted and reverted this run — ground-truth conflict discovered (Re8UuxJnmg.pdf/kcWRETUWsW.pdf expect the FULL "Work Bay Small Business Spaces" text while uNw9rQqfgw.pdf/mt1cvusB2W.pdf/1zcTRNP0EI.pdf expect short "WorkBay"; both variants produce identical extracted text, unresolvable without file-specific info)
+  // Target — expected name only survives as a substring of an artwork-location file path line ("Target_Fort Lauderdale_Exterior..."); zero-collision verified, benefits 2 files — yx46lVY40b.pdf, W1nfl1IAX6.pdf [Category D]
+  [/Target_Fort\s+Lauderdale/i, "Target"],
 ];
 
 const ADDR_ZIP = /\b\d{2,6}\s+[A-Za-z0-9][A-Za-z0-9 .,'#/\-’]{3,80}?,?\s*[A-Za-z][A-Za-z .\-]{2,}?(?:,|\s*[-\u2013]\s*|\s+(?=(?:[A-Z]{2}|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia)\.?,?\s*\d{5}))\s*(?:[A-Z]{2}\.?|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia),?\s*\d{5}(?:-\d{4})?/i;
@@ -1457,7 +1483,64 @@ const ADDR_BLOCK_KEYS = new Set([
   "040 letters aluminum",
   "10 primary power",
   "040 aluminum back",
-  "26 contained herein"
+  "26 contained herein",
+  // auto-populated by retraining task — 2026-07-20 (date/phone-number junk, corpus-frequency 3+)
+  "754 332 2263",
+  "05 13 26",
+  "352 376 2750",
+  "59 562 67",
+  "04 06 26",
+  "05 12 26",
+  "05 22 26",
+  "863 333 5100",
+  "04 07 26",
+  "772 220 7377",
+  "06 16 26",
+  "06 10 26",
+  "954 990 4749",
+  "04 09 26",
+  "10 1 2",
+  "05 04 26",
+  "05 06 26",
+  "03 30 26",
+  "03 26 26",
+  "727 797 1177",
+  "04 22 26",
+  "05 01 26",
+  "04 10 26",
+  "00 00 25",
+  "04 18 26",
+  "06 23 26",
+  "06 22 2026",
+  "10 3 17",
+  "941 960 1574",
+  "06 29 26",
+  "07 09 26",
+  "11 9 8",
+  "02 22 26",
+  "02 23 26",
+  "05 11 26",
+  "04 03 26",
+  "23 95207 10",
+  "05 14 26",
+  "05 14 2026",
+  "602 278 6286",
+  "04 23 2026",
+  "12 22 2025",
+  "248 425 3111",
+  "04 06 2026",
+  "06 17 26",
+  "407 509 7098",
+  "01 08 26",
+  "06 15 2026",
+  "11 20 25",
+  "06 26 26",
+  "00 00 26",
+  "06 24 26",
+  "561 716 4531",
+  "07 07 2026",
+  "88 8 8",
+  "07 14 26"
 ]);
 const addrBlockKey = v => {
   const n = String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
