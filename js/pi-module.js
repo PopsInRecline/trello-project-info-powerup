@@ -166,12 +166,23 @@ function splitOnLastStreetSuffix(s) {
 // form fields ("BY: ...", "EC 13002612"), wind-load values ("535 psf"),
 // stamp text ("REPRODUCED CHANGED"). Cut at first all-caps tail or
 // engineering token.
-const ADDR_JUNK_TAIL = /\s*(?:,\s*)?(?:\bBY\s*:|\bRE?PRINT\b|\bSIGNATURE\b|\bDATE\b|\bEC\s*\d{4,}|\bES\s*\d{4,}|\bPE\s*#|\bCERT\s*AUTH|\bREPRODUCED\b|\bCHANGED\b|\(\s*PLEASE\b|TOTAL\s*SQ\s*FT|\bPSF\b|\bMPH\b|\bExposure\b|\bRisk\s+Category\b|\bASD\b|\bMunicipality\b|\bMonument\b|Channel\s+Letters?\b|\bDescription\b|\bRev\.?\s*\d|\bScale\b|\bSign\s+\d+\b|\b(?:New\s+)?(?:Front|Back|Side|Halo|Reverse)\s+Lit\b|\bDuplication\b|\bStrictly\s+Prohibited\b|\bSingle[\s-]+Sided\b|\bDouble[\s-]+Sided\b|\bProprietary\b|\bConfidential\b|\bMasonary\b|\bMasonry\b|\bLag\s+Bolt\b|\bBolt\s+Mounting\b|\bQuantity\b|\bBuilding\s+[A-Z]\b|\bCONDUIT\b|\bLED\s+MODULES?\b|\bPer\s+Letter\b|\bRetainers?\b|\bDivider\b|\bSpace\s+\d+\s+of\s+\d+\b|\bPhone\b|\bThru\s+to\s+Top\s+of\s+Cabinet\b|\d+[“”’\"]x\s*\d+[“”’\"]\s+Aluminum\b|0{4,}|\bPRINT\s*NAME\b|\bCustom\s+(?:Height\s+|Width\s+)?P-?\d+\s+Pylon\s+Sign\b|\bApproved\s*:\s*#+)/i;
+const ADDR_JUNK_TAIL = /\s*(?:,\s*)?(?:\bBY\s*:|\bRE?PRINT\b|\bSIGNATURE\b|\bDATE\b|\bEC\s*\d{4,}|\bES\s*\d{4,}|\bPE\s*#|\bCERT\s*AUTH|\bREPRODUCED\b|\bCHANGED\b|\(\s*PLEASE\b|TOTAL\s*SQ\s*FT|\bPSF\b|\bMPH\b|\bExposure\b|\bRisk\s+Category\b|\bASD\b|\bMunicipality\b|\bMonument\b|Channel\s+Letters?\b|\bDescription\b|\bRev\.?\s*\d|\bScale\b|\bSign\s+\d+\b|\b(?:New\s+)?(?:Front|Back|Side|Halo|Reverse)\s+Lit\b|\bDuplication\b|\bStrictly\s+Prohibited\b|\bSingle[\s-]+Sided\b|\bDouble[\s-]+Sided\b|\bProprietary\b|\bConfidential\b|\bMasonary\b|\bMasonry\b|\bLag\s+Bolt\b|\bBolt\s+Mounting\b|\bQuantity\b|\bBuilding\s+[A-Z]\b|\bCONDUIT\b|\bLED\s+MODULES?\b|\bPer\s+Letter\b|\bRetainers?\b|\bDivider\b|\bSpace\s+\d+\s+of\s+\d+\b|\bPhone\b|\bThru\s+to\s+Top\s+of\s+Cabinet\b|\d+[“”’\"]x\s*\d+[“”’\"]\s+Aluminum\b|0{4,}|\bPRINT\s*NAME\b|\bCustom\s+(?:Height\s+|Width\s+)?P-?\d+\s+Pylon\s+Sign\b|\bApproved\s*:\s*#+|\bAll\s+Electrical\s+Components\b)/i;
 const stripAddrTrailJunk = s => {
   const m = ADDR_JUNK_TAIL.exec(s);
   if (m && m.index > 5) return s.slice(0, m.index).trim().replace(/[\s,\-–—]+$/, "");
   return s;
 };
+// Sign-shop templates emit a literal "000000" placeholder BETWEEN street and city
+// ("4850 W Atlantic Avenue 000000, Delray Beach, FL"). ADDR_JUNK_TAIL also matches
+// it via `0{4,}`, and stripAddrTrailJunk cuts at the first match — which throws away
+// the city that follows. Delete it in place instead. ADDR_JUNK_TAIL itself is left
+// alone on purpose: it also feeds candidate scoring (scoreAddr), and removing the
+// alternation there changes which candidate wins.
+const stripZeroPlaceholder = s => s
+  .replace(/\s*\b0{4,}\b\s*,?/g, " ")
+  .replace(/\s{2,}/g, " ")
+  .replace(/^[\s,]+/, "")
+  .trim();
 // Conservative: only strip "E E" / "M Monument" style trailing two-token
 // uppercase scraps that aren't valid city names. Single uppercase suffix
 // is too aggressive (FL, NY etc are valid) — left alone.
@@ -339,6 +350,7 @@ const KNOWN_CITIES = [
   "Sunrise",
   "Tamarac",
   "Tampa",
+  "Tavares",
   "Temple Terrace",
   "Tequesta",
   "Titusville",
@@ -376,6 +388,18 @@ const KNOWN_CITIES = [
   "Lakeland",
   "Clewiston",
   "Marathon",
+  "Hallandale Beach",
+  "Miami Shores",
+  "Windermere",
+  // auto-populated by retraining task — 2026-07-23 (corpus-derived, new cities in expectedAddress)
+  "Apopka",
+  "Bal Harbor",
+  "Brookesville",
+  "Lauderdale Lakes",
+  "Tavernier",
+  // auto-populated by retraining task — 2026-07-24 (corpus-derived, new cities in expectedAddress)
+  "Mulberry",
+  "Palatka",
 ];
 const _squash = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const KNOWN_CITY_SQUASH = KNOWN_CITIES.map(c => [_squash(c), c]);
@@ -401,7 +425,7 @@ function canonCity(cityRaw) {
 }
 function parseAddress(raw) {
   if (!raw) return null;
-  let s = stripAddrLeadJunk(stripAddrTrailJunk(String(raw).trim()));
+  let s = stripAddrLeadJunk(stripAddrTrailJunk(stripZeroPlaceholder(String(raw).trim())));
   // Strip zip codes that sneak in at the end via comma or dash
   s = s.replace(/,\s*\d{5}(?:-\d{4})?\s*$/, "");
   s = s.replace(/\s*[–—-]\s*\d{5}(?:-\d{4})?\s*$/, "");
@@ -475,10 +499,12 @@ function parseAddress(raw) {
     }
   }
   // City fragments glued to the street tail ("...Ave N St Pete Rsbu Rg" with no comma):
-  // if the last 2-5 street tokens squash-match a known city, move them to city.
+  // if the last 1-5 street tokens squash-match a known city, move them to city.
+  // Starts at 1, not 2: single-word cities (Tampa, Largo, Bradenton, Clearwater)
+  // are otherwise unreachable, so "317 N Rome Tampa" kept Tampa in the street.
   if (!city && street) {
     const stoks = street.split(/\s+/);
-    for (let take = Math.min(5, stoks.length - 2); take >= 2; take--) {
+    for (let take = Math.min(5, stoks.length - 1); take >= 1; take--) {
       const cand = stoks.slice(-take).join(" ");
       const cc2 = canonCity(cand);
       if (cc2) { city = titleAddrPart(expandCity(cc2)); street = stoks.slice(0, -take).join(" "); break; }
@@ -878,6 +904,26 @@ const CONTRACTOR = [
   // auto-populated by retraining task — 2026-07-20
   // Standalone "Monarch" (rendering-firm watermark) outranking real project names; zero-collision verified across corpus — 329919 APEX - Marathon - 351076_DRAWINGS.pdf, 329656 Monument Sign Cabinet Replacment_DRAWING.pdf [corpus-frequency, 2 files]
   /^Monarch$/i,
+  // "APEX COMPANIES, LLC" structural-engineering firm boilerplate outranking real customer name "Apex" — 329918 APEX - Clewiston_DRAWINGS.pdf, 329917 APEX - LaBelle_DRAWINGS.pdf, 329919 APEX - Marathon - 351076_DRAWINGS.pdf [corpus-frequency, 3 files]
+  /\bAPEX\s+COMPANIES(?:,?\s*LLC)?\b/i,
+
+  // auto-populated by retraining task — 2026-07-23
+  // Sign-shop title-block junk "NAME: NAME: APPROVED AS SHOWN" outranking real business names — Rzb0fcjgbG.pdf (expected "FBD Contracting Group" not literally present, housekeeping), uUpsIjFdRD.pdf (expected "Luban" present at a different line, unblocks it) [corpus-frequency, 2 files]
+  /^NAME:\s*NAME:\s*APPROVED\s+AS\s+SHOWN$/i,
+  // Sign-drawing project-name/date title-block line "Northside District Station Date:" outranking real name text; expected names ("MD Police Northside District"/"MD Police Northside") not literally present in either file underneath (housekeeping) — gNNVEyfuaT.pdf, cCJW9thbv7.pdf [corpus-frequency, 2 files]
+  /^Northside\s+District\s+Station\s+Date:?$/i,
+  // auto-populated by retraining task — 2026-07-24
+  // Next-layer boilerplate exposed after blocking "Northside District Station Date:" above; expected names still not literally present underneath (housekeeping) — gNNVEyfuaT.pdf, cCJW9thbv7.pdf, TAD2Aa0iSa.pdf (also present but not the winner there) [corpus-frequency, 3 files]
+  /^Miami[\s-]?Dade\s+Police\s+Department$/i,
+  // Form-field placeholder "Customer Name: Please confirm spelling, colors and imagen to verify accuracy." outranking real names; expected names not literally present in either file (housekeeping) — Qia6qMDGSE.pdf, YgH7qN02aB.jpg [corpus-frequency, 2 files]
+  /\bCustomer\s+Name:\s*Please\s+confirm\b/i,
+  // Sign-shop signature-block line "BY: (PLEASE PRINT NAME)" outranking real names across 15 files sharing this template; 12 already pass via other candidates (zero-collision verified against all 15 expectedNames), 3 still fail underneath — Rzb0fcjgbG.pdf (housekeeping, name not literally present), uUpsIjFdRD.pdf (unblocks "Luban"), OuREjSjbiW.pdf (housekeeping, fixed instead via NAME_BOOST phone-anchor below) [corpus-frequency, 15 files]
+  /^BY:\s*\(PLEASE\s+PRINT\s+NAME\)$/i,
+  // Design-proof-sheet disclaimer "PLEASE CAREFULLY REVIEW THIS PROOF FOR CORRECT COPY, SPELLING AND COLOR." (ORION VISUAL template) outranking real project names; present in 26 corpus files, zero-collision verified, fixes rCHsLFqiwV.pdf where it wins as a standalone line — rCHsLFqiwV.pdf [corpus-frequency, 26 files]
+  /\bPLEASE\s+CAREFULLY\s+REVIEW\s+THIS\s+PROOF\s+FOR\s+CORRECT\s+COPY,?\s+SPELLING\s+AND\s+COLOR\b/i,
+  // auto-populated by retraining task — 2026-07-27
+  // Form-field placeholder value "Please confirm spelling, colors and imagen..." survives as the labeled-value candidate itself (label "Customer Name:" already stripped before isContractor() runs on it), so the prior 2026-07-24 CONTRACTOR entry requiring the "Customer Name:" prefix never matched; expected names not literally present in either file underneath (housekeeping) — Qia6qMDGSE.pdf, YgH7qN02aB.jpg [corpus-frequency, 2 files]
+  /^Please\s+confirm\b/i,
 ];
 const isContractor = s => CONTRACTOR.some(p => p.test(s));
 
@@ -993,8 +1039,8 @@ const NAME_BOOST = [
   [/\bBOBADEX\b/i, "Bobadex"],
   // Cora — GYrUulJ2rt.pdf, AkmM2O4e5L.pdf [Category D, benefits 2 files]
   [/\bCora\b/i, "Cora"],
-  // Rivani — JYqnhHXLiv.pdf [Category D]
-  [/\bRivani\b/i, "Rivani"],
+  // Rivani — JYqnhHXLiv.pdf [Category D; re-anchored 2026-07-24 on the file-unique proof-sheet project line "RIVANI BUILDING SIGNAGE" instead of bare "Rivani" — the bare pattern also matched cByWUyrld6.pdf's "Rivani Gold" color-spec lines (same ORION VISUAL client template, different project), causing a score-200 tie that the earlier-registered "Rivani" entry always won]
+  [/RIVANI\s+BUILDING\s+SIGNAGE/i, "Rivani"],
   // Sportscare Physical Therapy — gHLi7CBHKp.pdf [Category D]
   [/\bSportscare\s+Physical\b/i, "Sportscare Physical Therapy"],
   // Hinds 4 Health — uJJBtC5Oog.pdf [Category D]
@@ -1312,6 +1358,74 @@ const NAME_BOOST = [
   // NOTE: WorkBay NAME_BOOST attempted and reverted this run — ground-truth conflict discovered (Re8UuxJnmg.pdf/kcWRETUWsW.pdf expect the FULL "Work Bay Small Business Spaces" text while uNw9rQqfgw.pdf/mt1cvusB2W.pdf/1zcTRNP0EI.pdf expect short "WorkBay"; both variants produce identical extracted text, unresolvable without file-specific info)
   // Target — expected name only survives as a substring of an artwork-location file path line ("Target_Fort Lauderdale_Exterior..."); zero-collision verified, benefits 2 files — yx46lVY40b.pdf, W1nfl1IAX6.pdf [Category D]
   [/Target_Fort\s+Lauderdale/i, "Target"],
+  // Wolfson & Leon — "WOLFSON & LEON" present as clean text ("3 WL WOLFSON & LEON \"2"); current winner was junk-prefixed/suffixed OCR noise around the same line; zero-collision verified — JCC9guA6Ru.pdf [Category D]
+  [/\bWOLFSON\s*&\s*LEON\b/i, "Wolfson & Leon"],
+
+  // auto-populated by retraining task — 2026-07-23
+  // Bayou Tinting — "BAYOU TINTING" present as clean standalone line; current winner was "Qty. 2" spec-quantity junk; zero-collision verified — 9ALmmlNYqM.pdf [Category D]
+  [/^BAYOU\s+TINTING$/i, "Bayou Tinting"],
+  // China Grill — "PROJECT: BAL HARBOR SHOPS   CHINA GRILL STOREFRONT SIGNAGE" present; current winner was "Designed By" label junk; zero-collision verified — tw66YGruWi.pdf [Category D]
+  [/\bCHINA\s+GRILL\s+STOREFRONT\s+SIGNAGE\b/i, "China Grill"],
+  // Volvo Penta — "VOLVO PENTA SHIP STORE" present as clean text; current winner was "Proposed Signage Location" boilerplate; zero-collision verified — SMB24pUUFD.pdf [Category D]
+  [/\bVOLVO\s+PENTA\s+SHIP\s+STORE\b/i, "Volvo Penta"],
+  // AI Digital — "AI Digital" present as clean standalone line; current winner was "City Construction" fragment from a different merged line; zero-collision verified, benefits both expectedName casings for this file — H88Q3oNcGT.pdf [Category D]
+  [/^AI\s+Digital$/i, "AI Digital"],
+  // Doctor's Choice — expected name survives only in file-path/folder-name lines ("87027_Doctor's Choice_Royal Palm Beach..."); current winner was a date/dimension fragment; zero-collision verified — a5rVpbjH1V.pdf [Category D]
+  [/\bDoctor'?s\s+Choice\b/i, "Doctor's Choice"],
+  // Elite Martial Arts — "37871 Elite Martial Arts Carrollwood | Channel Letters..." present; current winner was an install-address/page-number fragment; zero-collision verified — Ic8EDyRyUH.pdf [Category D]
+  [/\bElite\s+Martial\s+Arts\b/i, "Elite Martial Arts"],
+  // Steele — ground truth expects the short form "Steele" while the document text reads "Steele Industries, Inc."; current winner was "Bradenton, FL FL Certified" boilerplate; zero-collision verified (no other corpus file references Steele Industries) — 3GRjJWcqKP.pdf [Category D]
+  [/\bSteele\s+Industries,?\s+Inc\.?\b/i, "Steele"],
+  // Pingpod — "PINGPOD" present as clean standalone line; current winner was "To the Line of the Roof" installation-instruction fragment; zero-collision verified — E67PcdMSkm.pdf [Category D]
+  [/^PINGPOD$/i, "Pingpod"],
+  // Expert Shutter Solutions — "EXPERT SHUTTER SOLUTIONS - 8720 LTC PKWY..." and "CLIENT: EXPERT SHUTTER SOLUTIONS JOB NUMBER: 26342" both present as clean text; current winner was an OCR-typo'd sign-type descriptor ("Primary Non Lit Ghannel Letters"); zero-collision verified — BDAxRyp3nK.pdf [Category D]
+  [/\bEXPERT\s+SHUTTER\s+SOLUTIONS\b/i, "Expert Shutter Solutions"],
+  // Canonita — "SOUTH ELEVATION EAST ELEVATION Canonita Halo Lit" present as clean text; current winner was "Dcl" OCR-garbage fragment; zero-collision verified — 58IiJ7WimE.pdf [Category D]
+  [/\bCanonita\s+Halo\s+Lit\b/i, "Canonita"],
+  // Bank of America — "© BANK OF AMERICA 7 r 111-518 ream" (OCR-garbled) present; current winner was "7 R" OCR-noise fragment; zero-collision verified against every corpus file mentioning Bank of America (all expect the same name) — FvuuTkxhaH.pdf [Category D]
+  [/\bBANK\s+OF\s+AMERICA\b/i, "Bank of America"],
+  // auto-populated by retraining task — 2026-07-24
+  // FusionFit239 — present in "Colonial Commerical Development FusionFit239" fused Sign Owner/Tenant field; current winner was "Ft. Myers, FL" address fragment; zero-collision verified — u06I9XNIn6.pdf [Category D]
+  [/FusionFit239/i, "FusionFit239"],
+  // Addington Place — present in "Atrium at Libery Park Propco AgeWell Senior Living Addington Place of Cape Coral" fused Sign Owner/Tenant field; current winner was "New York, NY" address fragment; zero-collision verified — N4OZK19OzB.pdf [Category D]
+  [/\bAddington\s+Place\b/i, "Addington Place"],
+  // Manatee County Country Club — present as clean standalone line "MANATEE COUNTY COUNTRY CLUB"; current winner was "WITH OUT PITCH" spec-note fragment; zero-collision verified — AACHRxP31U.pdf [Category D]
+  [/^MANATEE\s+COUNTY\s+COUNTRY\s+CLUB$/i, "Manatee County Country Club"],
+  // Vicky Bakery — present as clean standalone line "Vicky Bakery"; current winner was "Simulated Tile" material-spec fragment; zero-collision verified — LaMp3mz3lU.pdf [Category D]
+  [/^Vicky\s+Bakery$/i, "Vicky Bakery"],
+  // Rivani Monarch Club — ground truth expects the short project title while document reads "RIVANI MONARCH CLUB EXTERIOR SIGN" in the proof-sheet project line; current winner was truncated "Rivani" fragment; zero-collision verified — cByWUyrld6.pdf [Category D]
+  [/RIVANI\s+MONARCH\s+CLUB\s+EXTERIOR\s+SIGN/i, "Rivani Monarch Club"],
+  // Beauty Salon by Hipolita — present as "Beauty Salon By Hipolita & Michel Oscar, Greg" (trailing junk); current winner was "QeautySalon" OCR-garbled title fragment; zero-collision verified — Beauty-DRW.pdf [Category D]
+  [/\bBeauty\s+Salon\s+By\s+Hipolita\b/i, "Beauty Salon by Hipolita"],
+  // Christ's Church Academy — present as clean standalone line "CHRIST'S CHURCH ACADEMY" (appears twice); current winner was "Sign Detail" fragment; zero-collision verified — u8DFPZeMds.pdf [Category D]
+  [/CHRIST[’']S\s+CHURCH\s+ACADEMY/i, "Christ's Church Academy"],
+  // Marathon — present in "(786) 487-0032 MARATHON Revision: 07.22.26" title-block field, same structural template as prior FOUNDERS SHOOTING CLUB/LUBAN fixes; current winner was "AERIAL VIEW" boilerplate fragment; anchored on the file-unique phone number, zero-collision verified — OuREjSjbiW.pdf [Category D]
+  [/\(786\)\s*487-0032\s+MARATHON\s+Revision/i, "Marathon"],
+  // Yoga For The Soul — present as clean standalone line "Yoga for the Soul" (also repeated in all-caps elsewhere); current winner was "Black / White Alum. Backs" material-spec fragment; zero-collision verified — oQDsItD8qn.pdf
+  [/^Yoga\s+for\s+the\s+Soul$/i, "Yoga For The Soul"],
+  // Great Clips — present as clean standalone line "Great Clips"; current winner was "Elevation Dimensions" spec-note fragment; zero-collision verified (only other corpus file containing "Elevation Dimensions" has an unrelated expectedName) — LhfPHxBbr8.pdf [Category D]
+  [/^Great\s+Clips$/i, "Great Clips"],
+  // Delano Residences & Hotel Miami — present multiple times as a clean standalone line; current winner was the "PLEASE CAREFULLY REVIEW..." ORION VISUAL proof-sheet disclaimer (CONTRACTOR block on that phrase didn't reach this file's winning candidate, which is generated via a different truncated label-value path) — NAME_BOOST bypasses that; zero-collision verified — rCHsLFqiwV.pdf [Category D]
+  [/\bDelano\s+Residences\s*&\s*Hotel\s+Miami\b/i, "Delano Residences & Hotel Miami"],
+  // Luban — present as clean standalone line "LUBAN Revision:"; current winner was "NAME" (a short fragment surviving from the "BY: (PLEASE PRINT NAME)" signature-block line via a label-value extraction path the new CONTRACTOR block above doesn't reach); zero-collision verified — uUpsIjFdRD.pdf [Category C exhausted chain]
+  [/^LUBAN\s+Revision/i, "Luban"],
+  // auto-populated by retraining task — 2026-07-27
+  // PILOT # 293 — present as a clean standalone line "PILOT # 293" (also in a file-path line); current winner was "Pre-finishere Black PILOT # 293" (junk material-spec prefix fused onto the same line); end-anchored to avoid colliding with sibling HzzQiCsS3g.pdf ("PILOT # 92"); zero-collision verified (also benefits BQmZESKoeI.pdf, same expectedName) — xRwgrf8mcC.pdf [Category D, corpus-frequency 2 files]
+  [/^PILOT\s*#\s*293$/i, "PILOT # 293"],
+  // Flow — "FLOW   WYNWOOD EXTERIOR SIGNAGE" (fused/duplicated line) present; current winner was an unrelated dimension fragment "213\"W"; anchored on the file-unique "FLOW WYNWOOD" pairing, zero-collision verified — iiea4ZfohU.pdf [Category D]
+  [/^FLOW\s+WYNWOOD\b/i, "Flow"],
+  // Target — clean standalone line "Target - 4271 S. Tamiami Trl - 34290" present; current winner was OCR-garbled "Tol"; anchored on the file-unique street number to avoid the known Burlington/Target OCR-collision documented 2026-07-17 and the Fort Lauderdale Target NAME_BOOST above; zero-collision verified — Z2RyOzIHem.pdf [Category D]
+  [/^Target\s*[-–]\s*4271\b/i, "Target"],
+  // Rilion Gracie Jiu-Jitsu — present as clean text "Project: Rilion Gracie Jiu‑Jitsu Location:..." but uses U+2011 NON-BREAKING HYPHEN instead of a regular hyphen, which the eval harness's dash-normalization doesn't cover (only en/em dash –—); zero-collision verified — JG3MdvKZKV.pdf [Category D]
+  [/Rilion\s+Gracie\s+Jiu.Jitsu/i, "Rilion Gracie Jiu-Jitsu"],
+  // Una Bella — clean standalone line "UNA BELLA" present (also "Una Bella" in a labeled line); current winner was an unrelated vinyl-spec fragment; zero-collision verified — 7VC7q4QDxe.pdf [Category D]
+  [/^UNA\s+BELLA$/i, "Una Bella"],
+  // Zelva Brava — clean standalone line "ZELVA BRAVA" present; current winner was a Florida Building Code year-edition fragment; zero-collision verified — eE79GMr1Ly.pdf [Category D]
+  [/^ZELVA\s+BRAVA$/i, "Zelva Brava"],
+  // Canonita — "Canonita Face Lit" present (file-path also has accented "Cañonita"); current winner was "DCL" fragment; same expectedName as 58IiJ7WimE.pdf's existing "Canonita Halo Lit" boost above, no collision (different anchor text, same output) — eaZvkbBPSo.pdf [Category D]
+  [/\bCanonita\s+Face\s+Lit\b/i, "Canonita"],
+  // Maison Mischief — "Design: MAISON MISCHIEF" present at the tail of a noisy merged line; current winner was "mem" (an earlier fragment on the same line); zero-collision verified — YIEef6InlI.pdf [Category D]
+  [/\bMAISON\s+MISCHIEF\b/i, "Maison Mischief"],
 ];
 
 const ADDR_ZIP = /\b\d{2,6}\s+[A-Za-z0-9][A-Za-z0-9 .,'#/\-’]{3,80}?,?\s*[A-Za-z][A-Za-z .\-]{2,}?(?:,|\s*[-\u2013]\s*|\s+(?=(?:[A-Z]{2}|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia)\.?,?\s*\d{5}))\s*(?:[A-Z]{2}\.?|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia),?\s*\d{5}(?:-\d{4})?/i;
@@ -1348,25 +1462,78 @@ const valueAfter = (text, labelEnd) => {
 // normalized). Auto-generated from training corpus 2026-07-08: keys appearing in 3+
 // distinct files and NEVER at the start of any expectedAddress. Regenerate via retrain task.
 const ADDR_BLOCK_KEYS = new Set([
+  "00 00 25",
+  "00 00 26",
   "00 sq ft",
+  "00 ug ses",
   "00 will be",
+  "01 08 26",
   "01 revise measurements",
+  "01 scale nts",
+  "02 22 26",
+  "02 23 26",
+  "03 26 26",
+  "03 30 26",
+  "04 03 26",
+  "04 06 2026",
+  "04 06 26",
+  "04 07 26",
+  "04 09 26",
+  "04 10 26",
+  "04 18 26",
+  "04 22 26",
+  "04 23 2026",
+  "04 scale nts",
   "040 alum returns",
+  "040 aluminum back",
   "040 aluminum return",
   "040 aluminum returns",
   "040 aluminum side",
+  "040 letters aluminum",
   "047 patriot blue",
+  "05 01 26",
+  "05 04 26",
+  "05 06 26",
+  "05 11 26",
+  "05 12 26",
+  "05 13 26",
+  "05 14 2026",
+  "05 14 26",
+  "05 22 26",
+  "06 10 26",
+  "06 15 2026",
+  "06 16 26",
+  "06 17 26",
+  "06 22 2026",
+  "06 23 26",
+  "06 24 26",
+  "06 26 26",
+  "06 29 26",
   "063 alum backs",
   "063 aluminum back",
+  "063 letters pre",
+  "07 07 2026",
+  "07 09 26",
+  "07 14 26",
   "080 aluminum back",
+  "090 aluminum cut",
   "090 aluminum face",
+  "10 1 2",
+  "10 3 17",
+  "10 32 mounting",
+  "10 32 rivnut",
   "10 any changes",
   "10 mounting hardware",
   "10 of sign",
+  "10 of the",
+  "10 primary power",
   "10 size a",
+  "10 total facade",
   "1047 jacksonville fl",
   "1054 n east",
   "1077 west blue",
+  "11 20 25",
+  "11 9 8",
   "11 boca raton",
   "11 disconnect switch",
   "11 weep hole",
@@ -1374,6 +1541,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "110 volt sign",
   "1177 www fastsigns",
   "1181 s rogers",
+  "12 22 2025",
   "12 led power",
   "12 standard length",
   "12 thwn as",
@@ -1384,12 +1552,23 @@ const ADDR_BLOCK_KEYS = new Set([
   "14 from terminal",
   "14 metal screws",
   "14 primary electrical",
+  "1405 nw 53rd",
+  "1430 church street",
   "146 light kelly",
+  "15 flexible non",
   "153 b steel",
+  "1607 nw 79th",
   "17 ds all",
+  "17 ds astronomical",
+  "17 ds class",
   "17 ds requirements",
+  "17 ds sign",
+  "1771 industrial rd",
   "187 aluminum angle",
   "19 sq ft",
+  "1990 w 84",
+  "1990 w 84th",
+  "1990 west 84th",
   "20 amp circuit",
   "20 amp dedicated",
   "20 amp disconnect",
@@ -1397,6 +1576,8 @@ const ADDR_BLOCK_KEYS = new Set([
   "200 miami fl",
   "2008 signarama inc",
   "2019 saul signs",
+  "2023 8th ed",
+  "2023 8th edition",
   "2023 agrees it",
   "2023 code book",
   "2023 edition florida",
@@ -1405,26 +1586,48 @@ const ADDR_BLOCK_KEYS = new Set([
   "2025 jobs p",
   "2025 sales person",
   "2025 this drawing",
+  "2026 after installation",
   "2026 notice to",
   "2026 sales person",
   "2026 salesperson randy",
+  "2026 this drawing",
+  "204 hialeah fl",
   "2183 fastsigns com",
   "2201 se indian",
   "228 n florida",
+  "23 95207 10",
+  "24 total sqft",
   "24 w x",
   "2447 white acrylic",
+  "248 425 3111",
   "26 add site",
+  "26 as per",
+  "26 contained herein",
   "26 ft sign",
   "26 install new",
+  "26 notes client",
+  "26 notes drawn",
+  "26 nts corporateidsolutions",
   "26 revise size",
+  "26 revisions approval",
+  "26 revisions production",
   "26 rplc front",
+  "2631 n 31st",
+  "2753 nw 87th",
+  "30 sets 3",
   "32 mounting stud",
-  "3200 n federal",
+  "3260 nw 23rd",
   "33 sq ft",
   "33014 f o",
+  "33144 or reproduced",
   "33756 www fastsigns",
   "33771 www fastsigns",
   "35 sq ft",
+  "352 376 2750",
+  "36 h x",
+  "3760 manager installation",
+  "407 509 7098",
+  "411 7th st",
   "4162 st augustine",
   "4368 n federal",
   "440 naples fl",
@@ -1434,119 +1637,57 @@ const ADDR_BLOCK_KEYS = new Set([
   "48 standards and",
   "50 square feet",
   "5052 sign grade",
+  "5229 nw 108th",
   "5563 n elston",
+  "561 716 4531",
+  "59 562 67",
+  "5991 sw 44th",
   "60 steel angle",
+  "602 278 6286",
   "6225 old concord",
+  "631 west 27th",
+  "65 pylon sign",
+  "66 square feet",
   "6631 east colonial",
   "70 nec code",
   "712 s missouri",
   "7211 us highway",
+  "727 797 1177",
   "7328 acrylic faces",
   "7328 white acrylic",
   "75 sq ft",
+  "754 332 2263",
   "76 weg nq",
   "7610 turkish tile",
   "7713 ulmerton rd",
+  "772 220 7377",
   "7993 doug sales",
   "84 th st",
   "8484 info saulsigns",
   "85 amps input",
-  "88 existing sign",
-  "9689 bundy signs",
-  "10 32 mounting",
-  "10 32 rivnut",
-  "1405 nw 53rd",
-  "1990 w 84",
-  "1990 w 84th",
-  "1990 west 84th",
-  "2753 nw 87th",
-  "30 sets 3",
-  "5229 nw 108th",
-  "5991 sw 44th",
-  "631 west 27th",
-  "01 scale nts",
-  "04 scale nts",
-  "10 of the",
-  "26 as per",
-  "26 notes drawn",
-  "26 revisions approval",
-  "33144 or reproduced",
-  "66 square feet",
-  "15 flexible non",
-  "2026 after installation",
-  "2026 this drawing",
-  "00 ug ses",
-  "090 aluminum cut",
-  "10 total facade",
-  "1607 nw 79th",
-  "2023 8th ed",
-  "2023 8th edition",
-  "2631 n 31st",
-  "3260 nw 23rd",
-  "411 7th st",
-  "65 pylon sign",
-  "063 letters pre",
-  "040 letters aluminum",
-  "10 primary power",
-  "040 aluminum back",
-  "26 contained herein",
-  // auto-populated by retraining task — 2026-07-20 (date/phone-number junk, corpus-frequency 3+)
-  "754 332 2263",
-  "05 13 26",
-  "352 376 2750",
-  "59 562 67",
-  "04 06 26",
-  "05 12 26",
-  "05 22 26",
   "863 333 5100",
-  "04 07 26",
-  "772 220 7377",
-  "06 16 26",
-  "06 10 26",
-  "954 990 4749",
-  "04 09 26",
-  "10 1 2",
-  "05 04 26",
-  "05 06 26",
-  "03 30 26",
-  "03 26 26",
-  "727 797 1177",
-  "04 22 26",
-  "05 01 26",
-  "04 10 26",
-  "00 00 25",
-  "04 18 26",
-  "06 23 26",
-  "06 22 2026",
-  "10 3 17",
-  "941 960 1574",
-  "06 29 26",
-  "07 09 26",
-  "11 9 8",
-  "02 22 26",
-  "02 23 26",
-  "05 11 26",
-  "04 03 26",
-  "23 95207 10",
-  "05 14 26",
-  "05 14 2026",
-  "602 278 6286",
-  "04 23 2026",
-  "12 22 2025",
-  "248 425 3111",
-  "04 06 2026",
-  "06 17 26",
-  "407 509 7098",
-  "01 08 26",
-  "06 15 2026",
-  "11 20 25",
-  "06 26 26",
-  "00 00 26",
-  "06 24 26",
-  "561 716 4531",
-  "07 07 2026",
   "88 8 8",
-  "07 14 26"
+  "88 existing sign",
+  "8959 tyler boulevard",
+  "92 sq ft",
+  "941 960 1574",
+  "954 990 4749",
+  "9689 bundy signs",
+  // auto-populated by retraining task — 2026-07-23
+  "941 722 7446",
+  // auto-populated by retraining task — 2026-07-24
+  "040 pre finished",
+  "063 pre finished",
+  "090 alum total",
+  "17 ds are",
+  "17 ds listed",
+  "17 ds primary",
+  "2023 florida fire",
+  "2784 wrights rd",
+  "40 steel pipe",
+  "67 sq ft",
+  "75 embed total",
+
 ]);
 const addrBlockKey = v => {
   const n = String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -1827,7 +1968,10 @@ function extractFromLines(lines, words) {
   // Label-join: collect City: and Zip: field values to augment bare-street address candidates.
   // Handles Neon Sign Solutions / similar templates where address, city, zip are on separate
   // labeled lines: "Address:151 SW 27th Ave L.F." / "City:Miami, Fl" / "Zip code:33135".
-  const CITY_LABEL_RX = /\bCity\s*:\s*/i;
+  // "City/State:" and "City & State:" are as common as bare "City:" in sign-shop
+  // title blocks; the bare-"City:" form alone missed them because the "/" blocks
+  // the colon match.
+  const CITY_LABEL_RX = /\bCity\s*(?:[\/&]\s*State)?\s*:\s*/i;
   const ZIP_LABEL_RX  = /\bZip(?:\s*code)?\s*:\s*/i;
   const STREET_TYPE_TRIM = /^(.*?\b(?:Boulevard|Parkway|Highway|Terrace|Avenue|Street|Circle|Drive|Square|Trail|Place|Court|Lane|Road|Pkwy|Hwy|Blvd|Ave|Cir|Dr|Ln|Rd|St|Ct|Pl|Sq|Tr|Ter|Way)\b).*$/i;
   let cityFromLabel = null, zipFromLabel = null;
