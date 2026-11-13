@@ -22,6 +22,17 @@ TrelloPowerUp.initialize({
           height: 360,
         });
       },
+    }, {
+      // TEMPORARY: download test for the merge-tool port (see dltest.html).
+      icon: new URL("./icon.svg", window.location.href).href,
+      text: "Download test",
+      callback: function (t) {
+        return t.modal({
+          title: "Download test",
+          url: "./dltest.html",
+          fullscreen: true,
+        });
+      },
     }];
   },
 }, {

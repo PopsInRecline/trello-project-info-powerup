@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Download test</title>
+<!-- TEMPORARY: checks whether a Power-Up modal may save files to the local
+     machine (needed before porting the PDF Merge Tool into Trello). Remove the
+     "Download test" card button in index.html and this file once settled. -->
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<script src="./js/config.js"></script>
+<style>
+  body { margin: 0; padding: 20px 28px; font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; color: #172b4d; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #5e6c84; margin: 0 0 18px; }
+  .test { border: 1px solid #dfe1e6; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; max-width: 760px; }
+  .test b { display: block; margin-bottom: 4px; }
+  .test p { margin: 0 0 8px; color: #5e6c84; font-size: 13px; }
+  button, a.btn { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 6px; border: 1px solid #c1c7d0; background: #f4f5f7; color: #172b4d; cursor: pointer; text-decoration: none; display: inline-block; }
+  .log { font: 12px/1.4 Consolas, monospace; color: #5e6c84; margin-top: 6px; white-space: pre-wrap; }
+  .ok { color: #216e4e; } .err { color: #ae2e24; }
+</style>
+</head>
+<body>
+<h1>Download test</h1>
+<p class="sub">Run each test, then check whether a file landed in your Downloads folder (or a save dialog appeared). Report back which numbers worked.</p>
+
+<div class="test">
+  <b>1. Click a download link (how the merge tool does it)</b>
+  <p>A small generated PDF behind an &lt;a download&gt; link you click yourself.</p>
+  <a class="btn" id="t1">Download test-1-link.pdf</a>
+</div>
+
+<div class="test">
+  <b>2. Automatic download after a 3-second wait</b>
+  <p>Simulates "Merge and download" saving by itself after the merge finishes (no second click).</p>
+  <button id="t2">Start (wait 3 s, then save test-2-auto.pdf)</button>
+  <div class="log" id="t2log"></div>
+</div>
+
+<div class="test">
+  <b>3. A real attachment from this card</b>
+  <p>Fetches the newest PDF attachment through the proxy (real file size), then gives a link to save it.</p>
+  <button id="t3">Fetch newest PDF</button>
+  <span id="t3link"></span>
+  <div class="log" id="t3log"></div>
+</div>
+
+<div class="test">
+  <b>4. Fallback: open the PDF in a new tab</b>
+  <p>If 1–3 are blocked: opens the generated PDF in a browser tab, where you would save it from the viewer.</p>
+  <button id="t4">Open test PDF in new tab</button>
+  <div class="log" id="t4log"></div>
+</div>
+
+<div class="test">
+  <b>5. Fallback: open the tool outside Trello</b>
+  <p>Opens this page in its own tab (no Trello frame). Try test 1 again there.</p>
+  <button id="t5">Open standalone tab</button>
+  <div class="log" id="t5log"></div>
+</div>
+
+<div class="log" id="env"></div>
+
+<script>
+const CFG = window.PI_POWERUP_CONFIG || {};
+
+// Minimal valid one-page PDF with correct xref offsets.
+function makePdf(label) {
+  const text = `Download test: ${label} - ${new Date().toLocaleString()}`.replace(/[()\\]/g, "");
+  const stream = `BT /F1 18 Tf 72 720 Td (${text}) Tj ET`;
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  offs.forEach(o => { out += String(o).padStart(10, "0") + " 00000 n \n"; });
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Blob([out], { type: "application/pdf" });
+}
+function log(id, msg, cls) { const el = document.getElementById(id); el.className = "log " + (cls || ""); el.textContent = msg; }
+
+// 1 — user clicks the link directly
+const a1 = document.getElementById("t1");
+a1.href = URL.createObjectURL(makePdf("test 1 (clicked link)"));
+a1.download = "test-1-link.pdf";
+
+// 2 — programmatic click after the user gesture has expired
+document.getElementById("t2").onclick = () => {
+  log("t2log", "Waiting 3 s…");
+  setTimeout(() => {
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(makePdf("test 2 (automatic)"));
+      a.download = "test-2-auto.pdf";
+      document.body.appendChild(a); a.click(); a.remove();
+      log("t2log", "Save triggered. Did a file appear?");
+    } catch (e) { log("t2log", "Error: " + e.message, "err"); }
+  }, 3000);
+};
+
+// 3 — real attachment via proxy
+let _t = null;
+document.getElementById("t3").onclick = async () => {
+  if (!_t) { log("t3log", "Only works inside Trello.", "err"); return; }
+  try {
+    log("t3log", "Reading card…");
+    const token = await _t.getRestApi().getToken();
+    if (!token) { log("t3log", "Not authorized yet: open the Project Info button once first.", "err"); return; }
+    const cardId = _t.getContext().card;
+    const res = await fetch(`https://api.trello.com/1/cards/${cardId}?fields=name&attachments=true&key=${CFG.APP_KEY}&token=${token}`);
+    const card = await res.json();
+    const name = a => a.fileName || a.name || "attachment.pdf";
+    const pdfs = (card.attachments || []).filter(a => a.mimeType === "application/pdf" || /\.pdf$/i.test(name(a)))
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!pdfs.length) { log("t3log", "No PDF attachments on this card.", "err"); return; }
+    const att = pdfs[0];
+    const direct = `https://api.trello.com/1/cards/${cardId}/attachments/${att.id}/download/${encodeURIComponent(name(att))}`;
+    const t0 = performance.now();
+    const r = await fetch(CFG.PROXY_URL + "/?url=" + encodeURIComponent(direct), {
+      headers: { Authorization: `OAuth oauth_consumer_key="${CFG.APP_KEY}", oauth_token="${token}"` } });
+    if (!r.ok) throw new Error("proxy HTTP " + r.status);
+    const blob = await r.blob();
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    const link = document.createElement("a");
+    link.className = "btn"; link.href = URL.createObjectURL(blob); link.download = "test-3-" + name(att);
+    link.textContent = "Save test-3-" + name(att);
+    const holder = document.getElementById("t3link"); holder.innerHTML = ""; holder.appendChild(link);
+    log("t3log", `Fetched ${(blob.size / 1048576).toFixed(1)} MB in ${secs} s. Click the Save link.`, "ok");
+  } catch (e) { log("t3log", "Error: " + e.message, "err"); }
+};
+
+// 4 — new tab with the PDF
+document.getElementById("t4").onclick = () => {
+  const w = window.open(URL.createObjectURL(makePdf("test 4 (new tab)")), "_blank");
+  log("t4log", w ? "Tab opened (if you see it)." : "Pop-up was blocked.", w ? "" : "err");
+};
+
+// 5 — standalone page
+document.getElementById("t5").onclick = () => {
+  const w = window.open(new URL("./dltest.html?standalone=1", location.href).href, "_blank");
+  log("t5log", w ? "Tab opened (if you see it)." : "Pop-up was blocked.", w ? "" : "err");
+};
+
+const inTrello = window.top !== window.self && !/standalone=1/.test(location.search);
+if (inTrello) { try { _t = window.TrelloPowerUp.iframe({ appKey: CFG.APP_KEY, appName: CFG.APP_NAME }); } catch (e) {} }
+document.getElementById("env").textContent =
+  (inTrello ? "Running inside Trello" : "Running standalone (outside Trello)") + " · " + navigator.userAgent;
+</script>
+</body>
+</html>
