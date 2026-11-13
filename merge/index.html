@@ -8826,11 +8826,13 @@ computeLayers();
      iframe). Everywhere else — the local file, the hosted page opened in a
      normal tab — this block does nothing and the tool behaves as always.
      What it changes: loads the card's PDF/JPG/PNG attachments as sources
-     (through the attachment proxy), hides training capture, and saves the
-     merged PDF to Downloads automatically when the merge finishes.
+     (through the attachment proxy), hides the page header, saves the merged
+     PDF to Downloads automatically when the merge finishes, and closes the
+     Trello window on Esc. Training capture stays available (cloud key is
+     per-origin, so it is entered once in the hosted copy).
      Deployed by Trello Project Info Power-Up/deploy_merge.mjs. -->
 <style>
-  body.in-trello header, body.in-trello #piDatasetBar, body.in-trello #piSaveTrainingBtn{display:none!important}
+  body.in-trello header{display:none!important}
   body.in-trello .app{padding-top:16px}
   .tr-panel{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px}
   .tr-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px}
@@ -8879,6 +8881,18 @@ computeLayers();
   };
 
   let CFG, t, token, cardId;
+
+  // Esc closes the Trello window and returns to the card. Keys typed inside
+  // this iframe never reach Trello, so its own Esc handling can't do it.
+  // An open wind-speed list takes the first Esc instead.
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    const wDrop = document.getElementById("windSpeedDrop");
+    if (wDrop && wDrop.classList.contains("open")) { wDrop.classList.remove("open"); return; }
+    if (t) t.closeModal();
+  });
+  window.focus(); // so the first Esc works without clicking into the window first
+
   const byName = a => a.fileName || a.name || "attachment";
   const kindOf = a => {
     const n = byName(a) + " " + (a.url || ""), m = a.mimeType || "";
