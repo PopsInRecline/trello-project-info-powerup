@@ -242,6 +242,9 @@
   .cp-mv-b{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:9px;padding:1px 3px;border-radius:3px;line-height:1;font-family:'JetBrains Mono',monospace}
   .cp-mv-b:hover{background:rgba(251,191,36,.15);color:var(--text)}
   .cp-mv-b.cp-rm:hover{background:rgba(248,113,113,.15);color:var(--error)}
+  .cp-mv-b.cp-2up{font-size:11px}
+  .cp-page.paired{border-style:double;border-width:3px;padding:3px 8px}
+  .cp-page.paired.multi{border-left-width:3px;border-left-style:solid}
   .cp-page.complex{border-color:rgba(251,191,36,.5)}
   .cp-page.raster{background:rgba(251,191,36,.08)}
   .cp-page .cp-icon{font-size:11px}
@@ -796,14 +799,141 @@ function getSrcPdfJs(fileIdx) {
   }
   return p;
 }
-/* pdf.js page for output page `entryIdx`, resolved back to its original file */
+/* pdf.js page for output page `entryIdx`, resolved back to its original file.
+   A 2-up entry resolves to a composite that renders both halves side by side. */
 async function getSrcPdfJsPage(entryIdx) {
   const e = pageEntries[entryIdx];
   if (!e) return null;
+  if (e.parts) {
+    const [a, b] = await Promise.all(e.parts.map(async p => (await getSrcPdfJs(p.fileIdx)).getPage(p.srcPage + 1)));
+    return pairedPdfJsPage(a, b);
+  }
   return (await getSrcPdfJs(e.fileIdx)).getPage(e.srcPage + 1);
 }
+/* The source pages an output page is made of — one, or two for a 2-up sheet */
+const entryParts = e => e.parts || [e];
 function activeFileCount() {
-  return new Set(pageEntries.map(e => e.fileIdx)).size;
+  return new Set(pageEntries.flatMap(entryParts).map(p => p.fileIdx)).size;
+}
+function sourcePageCount() {
+  return pageEntries.reduce((n, e) => n + entryParts(e).length, 0);
+}
+
+/* ── 2-up sheets ───────────────────────────────────────────────────
+   Product datasheets and brochures arrive as letter pages. Two of them
+   side by side are exactly 17×11, so a 2-up entry puts two source pages
+   on ONE template sheet. The pair entry carries the COMPOSITE geometry
+   in w/h (rotate 0), so placement, rotation and alignment treat it like
+   any 17×11 page; `parts` holds the two original entries, untouched, so
+   splitting gives them back exactly. Halves sit top-aligned, left to
+   right, at their displayed (post-/Rotate) size — no scaling.
+──────────────────────────────────────────────────────────────────── */
+function dispDims(p) {
+  return (p.rotate === 90 || p.rotate === 270) ? { w: p.h, h: p.w } : { w: p.w, h: p.h };
+}
+function makePairEntry(a, b) {
+  const da = dispDims(a), db = dispDims(b);
+  const ocg = !!(a.ocg || b.ocg);
+  return {
+    fileIdx: a.fileIdx, srcPage: a.srcPage, parts: [a, b],
+    ops: a.ops + b.ops, ocg, shading: !!(a.shading || b.shading),
+    raster: !!(a.raster || b.raster || ocg),
+    w: da.w + db.w, h: Math.max(da.h, db.h), rotate: 0, textDir: null
+  };
+}
+function pairWithNext(i) {
+  const a = pageEntries[i], b = pageEntries[i + 1];
+  if (!a || !b || a.parts || b.parts) return;
+  pageEntries.splice(i, 2, makePairEntry(a, b));
+  onPageOrderChanged();
+}
+function splitPair(i) {
+  const e = pageEntries[i];
+  if (!e || !e.parts) return;
+  e.parts.forEach(p => { p.raster = e.raster || p.ocg; });
+  pageEntries.splice(i, 1, ...e.parts);
+  onPageOrderChanged();
+}
+/* Portrait letter/A4-sized page, and anything bigger than a letter page */
+function isLetterPage(p) { const d = dispDims(p); return d.h > d.w && d.w <= 640 && d.h <= 860; }
+function isLargePage(p)  { const d = dispDims(p); return Math.max(d.w, d.h) > 900; }
+/* Default pairing for a fresh project: when letter-only files (datasheets,
+   brochures) come WITH larger drawings and the template is 11×17, put each
+   file's consecutive pages two to a sheet. An all-letter project, or a
+   letter page inside a drawing set, is left one page per sheet. */
+/* Files in the project made of 2+ portrait letter/A4 pages and nothing else —
+   product datasheets and brochures riding along with the drawings. */
+function datasheetFileSet() {
+  const all = pageEntries.flatMap(entryParts);
+  return new Set(srcFiles.map((_, fi) => fi).filter(fi => {
+    const pgs = all.filter(p => p.fileIdx === fi);
+    return pgs.length > 1 && pgs.every(isLetterPage);
+  }));
+}
+/* What Project Name/Address extraction reads: the drawings only. Datasheets
+   carry the MANUFACTURER's name and address in big type, which outscores the
+   job's title block, so their files are left out — unless every file is one,
+   then everything is read. A single remaining drawing file is passed through
+   byte for byte (keeps its metadata title); several are joined in page order. */
+async function extractionSourceBytes() {
+  const skip = datasheetFileSet();
+  const pages = pageEntries.flatMap(entryParts).filter(p => !skip.has(p.fileIdx));
+  if (!skip.size || !pages.length) return sourceBytes;
+  const files = [...new Set(pages.map(p => p.fileIdx))];
+  console.log(`Extraction: skipping datasheet file(s) ${[...skip].map(fi => srcFiles[fi].name).join(', ')}`);
+  if (files.length === 1 && pages.length === srcFiles[files[0]].pageCount &&
+      pages.every((p, k) => p.srcPage === k))
+    return srcFiles[files[0]].bytes;
+  const { PDFDocument } = PDFLib;
+  const out = await PDFDocument.create(), docs = new Map();
+  for (const p of pages) {
+    if (!docs.has(p.fileIdx))
+      docs.set(p.fileIdx, await PDFDocument.load(srcFiles[p.fileIdx].bytes, { ignoreEncryption: true }));
+    const [pg] = await out.copyPages(docs.get(p.fileIdx), [p.srcPage]);
+    out.addPage(pg);
+  }
+  return new Uint8Array(await out.save());
+}
+function autoPairLetterPages() {
+  if (tplInfo && !(tplInfo.w > 800 && tplInfo.h > 700)) return;
+  if (!pageEntries.some(isLargePage)) return;
+  const letterFiles = datasheetFileSet();
+  for (let i = 0; i + 1 < pageEntries.length; i++) {
+    const a = pageEntries[i], b = pageEntries[i + 1];
+    if (!a.parts && !b.parts && a.fileIdx === b.fileIdx && letterFiles.has(a.fileIdx))
+      pageEntries.splice(i, 2, makePairEntry(a, b));
+  }
+}
+/* A pdf.js-page look-alike (getViewport + render) for two pages side by
+   side, top-aligned on white — what the raster path and the hover preview
+   consume, so neither needs to know about 2-up. */
+function pairedPdfJsPage(a, b) {
+  return {
+    getViewport({ scale }) {
+      const va = a.getViewport({ scale }), vb = b.getViewport({ scale });
+      return { width: va.width + vb.width, height: Math.max(va.height, vb.height), scale, _va: va, _vb: vb };
+    },
+    render({ canvasContext: ctx, viewport: vp }) {
+      const tasks = [];
+      let cancelled = false;
+      const promise = (async () => {
+        ctx.save(); ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); ctx.restore();
+        let x = 0;
+        for (const [pg, v] of [[a, vp._va], [b, vp._vb]]) {
+          if (cancelled) break;
+          const c = document.createElement('canvas');
+          c.width = Math.round(v.width); c.height = Math.round(v.height);
+          const t = pg.render({ canvasContext: c.getContext('2d'), viewport: v });
+          tasks.push(t);
+          await t.promise;
+          ctx.drawImage(c, Math.round(x), 0);
+          x += v.width;
+        }
+      })();
+      return { promise, cancel() { cancelled = true; tasks.forEach(t => { try { t.cancel(); } catch (_) {} }); } };
+    }
+  };
 }
 
 function updateBtn(){
@@ -1009,7 +1139,11 @@ function removePage(i) {
   onPageOrderChanged();
 }
 function removeSourceFile(fileIdx) {
-  pageEntries = pageEntries.filter(e => e.fileIdx !== fileIdx);
+  /* A 2-up sheet that borrows a page from this file falls back to its other half */
+  pageEntries = pageEntries.flatMap(e => {
+    const keep = entryParts(e).filter(p => p.fileIdx !== fileIdx);
+    return keep.length === entryParts(e).length ? [e] : keep;
+  });
   if (!pageEntries.length) { clearSources(); return; }
   onPageOrderChanged();
 }
@@ -1040,7 +1174,7 @@ function renderComplexityUI() {
   cpFls.style.display = multi ? 'flex' : 'none';
   if (multi) {
     srcFiles.forEach((f, fi) => {
-      const n = pageEntries.filter(e => e.fileIdx === fi).length;
+      const n = pageEntries.flatMap(entryParts).filter(p => p.fileIdx === fi).length;
       if (!n) return;
       const chip = document.createElement('div');
       chip.className = 'cp-file';
@@ -1070,21 +1204,28 @@ function renderComplexityUI() {
     const isRaster     = e.raster;
     const isOcg        = e.ocg;
     const isShading    = e.shading;
+    const parts      = entryParts(e);
+    const isPair     = parts.length > 1;
+    const next       = pageEntries[i + 1];
+    const canPair    = !isPair && next && !next.parts;
     const btn = document.createElement('div');
     btn.className = 'cp-page' +
       (isComplex ? ' complex' : '') +
       (isRaster  ? ' raster'  : '') +
-      (multi     ? ' multi'   : '');
+      (multi     ? ' multi'   : '') +
+      (isPair    ? ' paired'  : '');
     btn.draggable = true;
     if (multi) btn.style.borderLeftColor = `hsl(${cpHue(e.fileIdx)} 85% 58%)`;
     const autoNote = isOcg     ? '\nHidden layer detected (auto-rasterized)'
                    : isShading ? '\nShading/pattern detected (rasterize if save fails)'
                    : '';
-    const srcName = (srcFiles[e.fileIdx] || {}).name || '?';
-    btn.title = `${srcName} — page ${e.srcPage + 1}\n${count.toLocaleString()} drawing operators${autoNote}\n` +
+    const srcDesc = parts.map(p => `${(srcFiles[p.fileIdx] || {}).name || '?'} — page ${p.srcPage + 1}`).join('\n+ ');
+    btn.title = `${isPair ? '2-up sheet:\n' : ''}${srcDesc}\n${count.toLocaleString()} drawing operators${autoNote}\n` +
                 `Click to toggle raster · drag to reorder`;
+    const srcTag = parts.map((p, k) =>
+      (k && p.fileIdx === parts[0].fileIdx) ? `${p.srcPage + 1}` : `f${p.fileIdx + 1}·p${p.srcPage + 1}`).join('+');
     const icon  = isOcg ? '🔒' : (isRaster ? '🖼' : (isShading ? '🎨' : (isComplex ? '⚡' : '📐')));
-    const lbl   = `Pg ${i + 1}`;
+    const lbl   = `Pg ${i + 1}${isPair ? ' · 2-up' : ''}`;
     const mode  = isRaster ? (isOcg ? 'RASTER (hidden layer)' : 'RASTER') : 'VECTOR';
     const ops   = count >= 1000
       ? `${(count / 1000).toFixed(1)}k ops`
@@ -1093,12 +1234,14 @@ function renderComplexityUI() {
       `<span class="cp-grip">⠿</span>` +
       `<span class="cp-icon">${icon}</span>` +
       `<span class="cp-lbl">${lbl}</span>` +
-      (multi ? `<span class="cp-src">f${e.fileIdx + 1}·p${e.srcPage + 1}</span>` : '') +
+      ((multi || isPair) ? `<span class="cp-src">${multi ? srcTag : 'p' + parts.map(p => p.srcPage + 1).join('+')}</span>` : '') +
       `<span class="cp-mode">${mode}</span>` +
       `<span class="cp-ops">${ops}</span>` +
       `<span class="cp-mv">` +
         `<button type="button" class="cp-mv-b" data-act="left"  title="Move earlier">◀</button>` +
         `<button type="button" class="cp-mv-b" data-act="right" title="Move later">▶</button>` +
+        (isPair  ? `<button type="button" class="cp-mv-b cp-2up" data-act="split" title="Split back into two sheets">⇹</button>`
+         : canPair ? `<button type="button" class="cp-mv-b cp-2up" data-act="pair" title="Put this page and the next one on one sheet (2-up)">⧉</button>` : '') +
         `<button type="button" class="cp-mv-b cp-rm" data-act="rm" title="Remove this page">✕</button>` +
       `</span>`;
 
@@ -1110,6 +1253,8 @@ function renderComplexityUI() {
         if (act === 'left')  nudgePage(i, -1);
         if (act === 'right') nudgePage(i,  1);
         if (act === 'rm')    removePage(i);
+        if (act === 'pair')  pairWithNext(i);
+        if (act === 'split') splitPair(i);
         return;
       }
       e.raster = !e.raster;
@@ -1151,7 +1296,7 @@ function renderComplexityUI() {
     });
 
     // Hover → cursor-anchored full-page preview, rendered from the ORIGINAL file
-    const key = `${e.fileIdx}:${e.srcPage}`;
+    const key = parts.map(p => `${p.fileIdx}:${p.srcPage}`).join('+');
     btn.addEventListener('mouseenter', ev => PagePreview.show(key, ev));
     btn.addEventListener('mousemove',  ev => PagePreview.move(ev));
     btn.addEventListener('mouseleave', () => PagePreview.hide());
@@ -1503,6 +1648,7 @@ async function ldSources(fileList) {
   }
 
   el.classList.add('loaded');
+  autoPairLetterPages();
   syncDerivedPageState();
   applyAutoPlacementDefaults();
   refreshSourceLabel();
@@ -1521,11 +1667,13 @@ async function ldSources(fileList) {
 /* Drop-zone caption + the filename recorded on training entries */
 function refreshSourceLabel() {
   const nFiles = activeFileCount();
-  const names  = [...new Set(pageEntries.map(e => e.fileIdx))]
+  const names  = [...new Set(pageEntries.flatMap(entryParts).map(p => p.fileIdx))]
     .map(fi => (srcFiles[fi] || {}).name || '?');
+  const nPg = sourcePageCount();
+  const sheets = nPg !== pageEntries.length ? ` → ${pageEntries.length} sheets` : '';
   document.getElementById('nameSource').textContent = !nFiles ? ''
-    : nFiles === 1 ? `${names[0]} — ${pageEntries.length} pg`
-    : `${nFiles} files · ${pageEntries.length} pages`;
+    : nFiles === 1 ? `${names[0]} — ${nPg} pg${sheets}`
+    : `${nFiles} files · ${nPg} pages${sheets}`;
   piSourceFileName = !names.length ? ''
     : names.length === 1 ? names[0]
     : `${names[0]} (+${names.length - 1} more)`;
@@ -1593,6 +1741,7 @@ function alignForPage(i, w, h, rotate) {
 function isNaturalSingleFile() {
   if (activeFileCount() !== 1) return false;
   const fi = pageEntries[0].fileIdx;
+  if (pageEntries.some(e => e.parts)) return false;
   if (pageEntries.length !== srcFiles[fi].pageCount) return false;
   return pageEntries.every((e, i) => e.srcPage === i);
 }
@@ -1608,19 +1757,51 @@ async function rebuildCombinedSource() {
   const { PDFDocument } = PDFLib;
   const out  = await PDFDocument.create();
   const docs = new Map();
-  for (const e of pageEntries) {
-    let d = docs.get(e.fileIdx);
+  const docFor = async fi => {
+    let d = docs.get(fi);
     if (!d) {
-      d = await PDFDocument.load(srcFiles[e.fileIdx].bytes, { ignoreEncryption: true });
-      docs.set(e.fileIdx, d);
+      d = await PDFDocument.load(srcFiles[fi].bytes, { ignoreEncryption: true });
+      docs.set(fi, d);
     }
-    const [pg] = await out.copyPages(d, [e.srcPage]);
+    return d;
+  };
+  for (const e of pageEntries) {
+    if (e.parts) { await addPairedPage(out, e, docFor); continue; }
+    const [pg] = await out.copyPages(await docFor(e.fileIdx), [e.srcPage]);
     out.addPage(pg);
   }
   sourceBytes = new Uint8Array(await out.save());
   console.log(`Combined source: ${pageEntries.length} page(s) from ${activeFileCount()} file(s)`);
 }
 async function ensureCombined() { if (combinedDirty) await rebuildCombinedSource(); }
+
+/* One w×h page holding a 2-up entry's two source pages as Form XObjects,
+   top-aligned left to right. Each half is embedded by its CropBox and
+   un-rotated with the same /Rotate cm the merge loop uses, so the merge
+   then sees an ordinary upright 17×11 page. */
+async function addPairedPage(out, e, docFor) {
+  const { PDFName } = PDFLib;
+  const page = out.addPage([e.w, e.h]);
+  let ops = '', x = 0;
+  for (const p of e.parts) {
+    const srcPage = (await docFor(p.fileIdx)).getPage(p.srcPage);
+    const cb = srcPage.getCropBox();
+    const emb = await out.embedPage(srcPage, {
+      left: cb.x, bottom: cb.y, right: cb.x + cb.width, top: cb.y + cb.height
+    });
+    const name = page.node.newXObject('Half', emb.ref);
+    const rotNode = srcPage.node.get(PDFName.of('Rotate'));
+    const rot = ((rotNode ? Number(rotNode.toString()) : 0) % 360 + 360) % 360;
+    const W = cb.width, H = cb.height;
+    const rotCm = rot === 90  ? `0 -1 1 0 0 ${W.toFixed(4)} cm `
+                : rot === 180 ? `-1 0 0 -1 ${W.toFixed(4)} ${H.toFixed(4)} cm `
+                : rot === 270 ? `0 1 -1 0 ${H.toFixed(4)} 0 cm ` : '';
+    const d = dispDims({ w: W, h: H, rotate: rot });
+    ops += `q 1 0 0 1 ${x.toFixed(4)} ${(e.h - d.h).toFixed(4)} cm ${rotCm}${name.asString()} Do Q\n`;
+    x += d.w;
+  }
+  page.node.addContentStream(out.context.register(out.context.stream(ops)));
+}
 
 /* Forget the loaded project (state only — no UI teardown, so a new drop
    can repopulate without the panel flashing empty in between). */
@@ -1997,7 +2178,8 @@ function pageAlignSummary() {
   const runs = [];
   pageEntries.forEach((_, i) => {
     const rot = rotateForPage(i);
-    const a = alignForPage(i) + (rot ? `, ${rotLabel(rot)}` : ''), last = runs[runs.length - 1];
+    const a = alignForPage(i) + (rot ? `, ${rotLabel(rot)}` : '') + (pageEntries[i].parts ? ', 2-up' : ''),
+          last = runs[runs.length - 1];
     if (last && last.a === a) last.to = i + 1; else runs.push({ a, from: i + 1, to: i + 1 });
   });
   if (runs.length === 1) return ' (all pages)';
@@ -2588,7 +2770,7 @@ async function doMerge() {
        layer visibility intact — pdf-lib's copyPages drops /OCProperties. ── */
     if (rasterPages.size > 0) {
       fill.style.width = "18%"; status.textContent = "Preparing rasterization…";
-      const needed = new Set([...rasterPages].map(i => pageEntries[i] && pageEntries[i].fileIdx));
+      const needed = new Set([...rasterPages].flatMap(i => pageEntries[i] ? entryParts(pageEntries[i]).map(p => p.fileIdx) : []));
       for (const fi of needed) if (fi != null) await getSrcPdfJs(fi);
     }
 
@@ -6137,6 +6319,16 @@ function extractFromLines(lines, words) {
       if (onlyZip) zipFromLabel = onlyZip[1];
     }
   }
+  // One-row "CITY: SARASOTA STATE: FL ZIP: 34237" (Gulf Coast Signs and other
+  // title blocks): the City: value runs on through the State:/Zip: labels.
+  // Fold them into "Sarasota, FL" — the zip is re-attached from ZIP_LABEL_RX
+  // below — so the joined address parses instead of failing scoreAddr.
+  if (cityFromLabel && /\bState\s*:/i.test(cityFromLabel)) {
+    cityFromLabel = cityFromLabel
+      .replace(/\s*\bZip(?:\s*code)?\s*:.*$/i, "")
+      .replace(/\s*,?\s*\bState\s*:\s*/i, ", ")
+      .replace(/[,\s]+$/, "").trim();
+  }
   if (cityFromLabel) {
     const BARE_STREET_RX = /^\d{2,6}\s+[A-Za-z]/;
     for (const cand of [...addrCands]) {
@@ -6577,6 +6769,27 @@ function extractFromLines(lines, words) {
   /* ═══ SYNCED-CORE-END ═══ */
 
   // ── pdf.js: extract text + word positions from page 1 (and page 2 if page 1 sparse)
+  // Rotated pages (/Rotate 90/180/270): pdf.js item transforms are in the
+  // UNROTATED page space, so on a page whose text reads upright once displayed,
+  // title-block rows come out as columns and a label never shares a line with
+  // its value ("JOB NAME:" / "GUNSTER"). Map such a page into displayed space,
+  // but only when that is the frame its text actually reads horizontally in
+  // (ties go to the displayed frame; a page whose text is drawn sideways on
+  // purpose keeps the raw frame). Returns null for unrotated pages, which keep
+  // the original coordinate math exactly.
+  function displayFrameFor(page, viewport, items) {
+    if (!((page.rotate || 0) % 360)) return null;
+    const T = it => pdfjsLib.Util.transform(viewport.transform, it.transform);
+    const horiz = m => Math.abs(m[1]) < 0.2 * Math.abs(m[0]);
+    let dispH = 0, rawH = 0;
+    for (const it of items) {
+      if (!it.str || !it.str.trim()) continue;
+      if (horiz(T(it))) dispH++;
+      if (horiz(it.transform)) rawH++;
+    }
+    return dispH >= rawH ? T : null;
+  }
+
   async function extractTextWithPositions(pdfBytes) {
     if (!window.pdfjsLib) throw new Error("pdf.js not loaded");
     // pdf.js detaches the ArrayBuffer on load — pass a fresh copy so the
@@ -6602,12 +6815,13 @@ function extractFromLines(lines, words) {
         charFragmented = true;
       }
       // Group by y-bucket into lines
+      const toDisp = displayFrameFor(page, viewport, content.items);
       const buckets = new Map();
       for (const it of content.items) {
         if (!it.str || !it.str.trim()) continue;
-        const tx = it.transform;
-        const x = tx[4], yFromBottom = tx[5];
-        const y = viewport.height - yFromBottom;
+        const tx = toDisp ? toDisp(it) : it.transform;
+        const x = tx[4];
+        const y = toDisp ? tx[5] : viewport.height - tx[5];
         const fs = Math.hypot(tx[0], tx[1]) || 8;
         const xEnd = x + (it.width || (it.str.length || 1) * fs * 0.5);
         const key = Math.round(y / 3);
@@ -8079,7 +8293,7 @@ async function extractProjectInfo() {
     /* Re-extract after a reorder reads the CURRENT page order */
     await ensureCombined();
     if (!sourceBytes) return;
-    const result = await PI.extract(sourceBytes, piSetStatus);
+    const result = await PI.extract(await extractionSourceBytes(), piSetStatus);
     const nameGuess = piTitleCase(cleanExtractedName(result.name || ""));
     document.getElementById("piName").value = nameGuess;
     let displayAddr = "";
@@ -8804,8 +9018,11 @@ async function loadLocalCache() {
 /* Page previews render from the ORIGINAL source file (key "fileIdx:srcPage"),
    never the combined doc — see the multi-source note above. */
 PagePreview.setResolver(async key => {
-  const [fi, sp] = key.split(":").map(Number);
-  return (await getSrcPdfJs(fi)).getPage(sp + 1);
+  const pgs = await Promise.all(key.split("+").map(async k => {
+    const [fi, sp] = k.split(":").map(Number);
+    return (await getSrcPdfJs(fi)).getPage(sp + 1);
+  }));
+  return pgs.length > 1 ? pairedPdfJsPage(pgs[0], pgs[1]) : pgs[0];
 });
 wire("dropSource","fileSource");
 selectTemplate('17x11'); // 11×17 is the default built-in template

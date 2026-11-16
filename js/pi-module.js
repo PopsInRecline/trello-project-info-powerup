@@ -170,7 +170,7 @@ function splitOnLastStreetSuffix(s) {
 // form fields ("BY: ...", "EC 13002612"), wind-load values ("535 psf"),
 // stamp text ("REPRODUCED CHANGED"). Cut at first all-caps tail or
 // engineering token.
-const ADDR_JUNK_TAIL = /\s*(?:,\s*)?(?:\bBY\s*:|\bRE?PRINT\b|\bSIGNATURE\b|\bDATE\b|\bEC\s*\d{4,}|\bES\s*\d{4,}|\bPE\s*#|\bCERT\s*AUTH|\bREPRODUCED\b|\bCHANGED\b|\(\s*PLEASE\b|TOTAL\s*SQ\s*FT|\bPSF\b|\bMPH\b|\bExposure\b|\bRisk\s+Category\b|\bASD\b|\bMunicipality\b|\bMonument\b|Channel\s+Letters?\b|\bDescription\b|\bRev\.?\s*\d|\bScale\b|\bSign\s+\d+\b|\b(?:New\s+)?(?:Front|Back|Side|Halo|Reverse)\s+Lit\b|\bDuplication\b|\bStrictly\s+Prohibited\b|\bSingle[\s-]+Sided\b|\bDouble[\s-]+Sided\b|\bProprietary\b|\bConfidential\b|\bMasonary\b|\bMasonry\b|\bLag\s+Bolt\b|\bBolt\s+Mounting\b|\bQuantity\b|\bBuilding\s+[A-Z]\b|\bCONDUIT\b|\bLED\s+MODULES?\b|\bPer\s+Letter\b|\bRetainers?\b|\bDivider\b|\bSpace\s+\d+\s+of\s+\d+\b|\bPhone\b|\bThru\s+to\s+Top\s+of\s+Cabinet\b|\d+[“”’\"]x\s*\d+[“”’\"]\s+Aluminum\b|0{4,}|\bPRINT\s*NAME\b|\bCustom\s+(?:Height\s+|Width\s+)?P-?\d+\s+Pylon\s+Sign\b|\bApproved\s*:\s*#+|\bAll\s+Electrical\s+Components\b|\bNo\s+Electric\b|\bSection\b|,?\s*\bUnit\b\s*$|\d+\s*Volt\s+Power\s+Supplies?\b|\bCity\/|\bSteel\s+Angle\b|\bRaceway\s+Anchor\s+Schedule\b|\bExisting\s+Sign\s+Poles\b|\bAllowed\s+Proposed\s+Total\b|\bCustomer\b|\d+[’\']-\d+[”"]|\d{2}[/]\d{2}[/]\d{2}\s*$)/i;
+const ADDR_JUNK_TAIL = /\s*(?:,\s*)?(?:\bBY\s*:|\bRE?PRINT\b|\bSIGNATURE\b|\bDATE\b|\bEC\s*\d{4,}|\bES\s*\d{4,}|\bPE\s*#|\bCERT\s*AUTH|\bREPRODUCED\b|\bCHANGED\b|\(\s*PLEASE\b|TOTAL\s*SQ\s*FT|\bPSF\b|\bMPH\b|\bExposure\b|\bRisk\s+Category\b|\bASD\b|\bMunicipality\b|\bMonument\b|Channel\s+Letters?\b|\bDescription\b|\bRev\.?\s*\d|\bScale\b|\bSign\s+\d+\b|\b(?:New\s+)?(?:Front|Back|Side|Halo|Reverse)\s+Lit\b|\bDuplication\b|\bStrictly\s+Prohibited\b|\bSingle[\s-]+Sided\b|\bDouble[\s-]+Sided\b|\bProprietary\b|\bConfidential\b|\bMasonary\b|\bMasonry\b|\bLag\s+Bolt\b|\bBolt\s+Mounting\b|\bQuantity\b|\bBuilding\s+[A-Z]\b|\bCONDUIT\b|\bLED\s+MODULES?\b|\bPer\s+Letter\b|\bRetainers?\b|\bDivider\b|\bSpace\s+\d+\s+of\s+\d+\b|\bPhone\b|\bThru\s+to\s+Top\s+of\s+Cabinet\b|\d+[“”’\"]x\s*\d+[“”’\"]\s+Aluminum\b|0{4,}|\bPRINT\s*NAME\b|\bCustom\s+(?:Height\s+|Width\s+)?P-?\d+\s+Pylon\s+Sign\b|\bApproved\s*:\s*#+|\bAll\s+Electrical\s+Components\b|\bNo\s+Electric\b|\bSection\b|,?\s*\bUnit\b\s*$|\d+\s*Volt\s+Power\s+Supplies?\b|\bCity\/|\bSteel\s+Angle\b|\bRaceway\s+Anchor\s+Schedule\b|\bExisting\s+Sign\s+Poles\b|\bAllowed\s+Proposed\s+Total\b|\bCustomer\b|\d+[’\']-\d+[”"]|\d{2}[/]\d{2}[/]\d{2}\s*$|\bExisting\s+Mullions\b)/i;
 const stripAddrTrailJunk = s => {
   const m = ADDR_JUNK_TAIL.exec(s);
   if (m && m.index > 5) return s.slice(0, m.index).trim().replace(/[\s,\-–—]+$/, "");
@@ -383,6 +383,7 @@ const KNOWN_CITIES = [
   "Royal Palm Beach",
   "Ruskin",
   "Safety Harbor",
+  "Saftey Harbor",
   "San Antonio",
   "Sanford",
   "Sarasota",
@@ -431,6 +432,7 @@ const KNOWN_CITIES = [
   "Winter Haven",
   "Winter Park",
   "Winter Springs",
+  "Ybor City",
   "Yulee",
   "Zephyrhills",
 ];
@@ -1159,6 +1161,37 @@ const CONTRACTOR = [
   // Publix store-hours label outranking real business names "Publix"/"Publix Liquors";
   // zero-collision verified — WyHze13jTD.pdf, fjqFDowNE9.pdf, HnF5t0ByIl.pdf [corpus-frequency, 3 files]
   /^M-Sun\s+9\s*am\s*-\s*9\s*pm\s+STORE\s+HOURS/i,
+  // Standalone "Location:" form-field label outranking real business names in 2 files
+  // with different expectedNames ("Burger King #5969" / "Vero Sports Bar");
+  // zero-collision verified — PYLON FACE.pdf, AkeTIBFT6p.pdf [corpus-frequency, 2 files]
+  /^Location:?\s*$/i,
+  // Sign-spec/title-block junk labels outranking real business names; zero-collision
+  // verified against every expectedName/expectedAddress in the corpus — 2026-09-02 retrain.
+  /^Proposed\s+Signage\s+Location\b/i, // kCFYQEdC0S.pdf [Category D]
+  /^To\s+New\s+Color\s+Program\b/i, // w9tpIjlLNc.pdf [Category D]
+  /^Elevation:?\s*(?:North|South|East|West)\s+Elevation\b/i, // 0tl9uL0cUO.pdf [Category D]
+  /\bInspected\s+(?:&|AND)\s+Labeled\s+in\s+Accordance\s+with\s+UL\b/i, // NS1i6HfksB.pdf [Category D, widened]
+  /^Disconnect\s+Switch\b/i, // j8BaXkrEkr.pdf [Category D]
+  /^White\s+LED\s+Modules?\b/i, // zEz8xtI7x8.pdf [Category D]
+  /^Posts?\s+\d+['’]?\s*Tall\b/i, // 1725 McMullen Booth 5.pdf [Category D, widened]
+  /^Look\s+Different\s+in\s+the\s+Final\s+Product\b/i, // 02QMYYX50i.pdf [Category D]
+  // 2026-09-03 retrain: sign-shop/form/spec boilerplate labels outranking real business
+  // names; zero-collision verified against every expectedName/expectedAddress in the corpus.
+  /^Signature\s*:?\s*[_\s]*Date\b/i, // form-field label outranking "Ride Now Powersports" — liYyoYAVU7.jpg [Category D]
+  /^Non-?electrical$/i, // sign-spec label outranking "Nova Classical Stem Academy" — Q8odhcdOJE.pdf [Category D]
+  /^Additional\s+Notes\b/i, // form-field label outranking "Primos Hermanos" — Ru7LHBZi0u.pdf [Category D]
+  /^Max\s*Metal\b/i, // ACM material-brand label outranking "Churchhill Furniture" — Fb81hk7Mo8.pdf [Category D]
+  /^Individual\s+Illuminated\s+Channel\s+Letters?\b/i, // sign-type label outranking "UMA Peruvian Restaurant" — hkzNxLvv4F.pdf [Category D]
+  /\bMechanically\s+Fastened\s+to\s+Panel\b/i, // sign-spec installation note outranking "Legacy at Margate (5215)" (name is Category A, housekeeping only) — vksJk6jWmc.pdf [Category D]
+  /^New\s+Sign\s+to\s+Plug\s+Into\b/i, // sign-spec note outranking "Spanish River HS" — hph2lTrudv.pdf [Category D]
+  /\bUL\s+Approved\b/i, // UL-listing label outranking "Gate" (name is Category A, housekeeping only) — zEz8xtI7x8.pdf [Category D]
+  /\bSIGN\s+INSTALLER\s+FINDS\s+ANY\s+DIFFERENCES\b/i, // sign-proof liability disclaimer boilerplate outranking real business names in 2 files with different expectedNames ("Just Salad" / "MIDERA FOOD PROCESSING") — Tq7c4oenW9.pdf, 96BZl8uQxD.pdf [corpus-frequency, 2 files]
+  /^Electrical\s+Notes\b/i, // sign-spec section header outranking real addresses in 4 files with different expectedAddresses (real address present but junk-prefixed by an "I N C O R P O R A T E D" watermark) — vUtjdDFlOA.pdf, AIYA92W4RI.pdf, Rz9OpwusBx.pdf, aT9sw9ISfU.pdf [corpus-frequency, 4 files]
+  /\bReference\s+code\s+is\s+NFPA\b/i, // electrical-code boilerplate note, same 4-file cluster as above — vUtjdDFlOA.pdf, AIYA92W4RI.pdf, Rz9OpwusBx.pdf, aT9sw9ISfU.pdf [corpus-frequency, 4 files]
+  // 2026-09-04 retrain: sign-vendor corporate/branch-office letterhead addresses
+  // outranking real client addresses in 2 files each with different expectedAddresses.
+  /\b1170\s+Claycraft\s+Road\b/i, // Gahanna OH sign-vendor HQ address (matches post-strip candidate value, not just the source line) — vzNOc5lWsD.pdf, F6nrCuzCsI.pdf [corpus-frequency, 2 files]
+  /^801\s+S\.?\s+Olive\s+Ave\.?\s*Suite\s+220\b/i, // West Palm Beach sign-vendor branch address — dVZdBnVPct.pdf, O7X9kB4SNr.pdf [corpus-frequency, 2 files]
 ];
 const isContractor = s => CONTRACTOR.some(p => p.test(s));
 
@@ -2017,6 +2050,39 @@ const NAME_BOOST = [
   // the Ronnie Fussell context to avoid colliding with "Take 5 Oil Change"
   // sibling brand naming; zero-collision verified — AaSDdiCrrt.pdf [Category D]
   [/\bRonnie\s+Fussell\b[\s\S]{0,20}Take\s+5\b/i, "Take 5"],
+
+  // St Thomas University — name split across two adjacent standalone lines
+  // ("ST.THOMAS" / "UNIVERSITY"); current winner was the bare "University" line
+  // alone; anchored on the file-unique "ST.THOMAS" fragment; zero-collision
+  // verified — IjCJA8DJ9t.pdf [Category D]
+  [/^ST\.?\s*THOMAS$/i, "St Thomas University"],
+
+  // 2026-09-04 retrain additions — Category D, full expected name present in
+  // extractedLines but losing to junk; each verified zero-collision against
+  // every expectedName in the corpus.
+  // Legendary Fitness — "PR OJECT: LEGENDARY FITNESS LOCATION: ..." — uFVQ0Q1Jrb.pdf
+  [/\bLEGENDARY\s+FITNESS\b/i, "Legendary Fitness"],
+  // Top Design Kitchen — "Top Design Kitchen & Bath BC2 page" — 4qsIZLc5Sx.pdf
+  [/\bTop\s+Design\s+Kitchen\b/i, "Top Design Kitchen"],
+  // MediLeaf — "Branding Campaign Options for MediLeaf" — 04RSUFkL7S.pdf
+  [/\bMediLeaf\b/i, "MediLeaf"],
+  // Miami Marlins Youth Academy — present in 2 sibling files, garbled OCR
+  // otherwise wins — b1BJ57Xej0.pdf, lTYUzVeY4o.pdf [corpus-frequency, 2 files]
+  [/\bMIAMI\s+MARLINS\s+YOUTH\s+ACADEMY\b/i, "Miami Marlins Youth Academy"],
+  // Potato Corner — "POTATO CORNER" — NS1i6HfksB.pdf
+  [/\bPOTATO\s+CORNER\b/i, "Potato Corner"],
+  // Cocoliche — "PROJECT: CORAL GABLES CONCEPTS COCOLICHE BLADE SIGN" — 02QMYYX50i.pdf
+  [/\bCOCOLICHE\b/i, "Cocoliche"],
+  // Orange Tint & More — "ORANGE TINT& MORE" — 1725 McMullen Booth 5.pdf
+  [/\bORANGE\s+TINT\s*&\s*MORE\b/i, "Orange Tint & More"],
+  // Fortune Modern Asian — "CLIENT: FORTUNE MODERN ASIAN JOB NUMBER: 26385" — nGbSDGHaqO.pdf
+  [/\bFORTUNE\s+MODERN\s+ASIAN\b/i, "Fortune Modern Asian"],
+  // Ballroom Atelier — "BALLROOM ATELIER DANCE ALDAY" — Q3XWATUXTB.pdf
+  [/\bBALLROOM\s+ATELIER\b/i, "Ballroom Atelier"],
+  // Miller's Ale House — line is vendor address glued to client name:
+  // "1940 Spearing Street, Jacksonville, Florida 32206 AC REACH NEON AND SIR & MILLER'S ALE HOUSE"
+  // — YeuD8dwWZF.pdf [Category D, zero-collision]
+  [/\bMILLER'S\s+ALE\s+HOUSE\b/i, "Miller's Ale House"],
 ];
 
 const ADDR_ZIP = /\b\d{2,6}\s+[A-Za-z0-9][A-Za-z0-9 .,'#/\-’]{3,80}?,?\s*[A-Za-z][A-Za-z .\-]{2,}?(?:,|\s*[-\u2013]\s*|\s+(?=(?:[A-Z]{2}|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia)\.?,?\s*\d{5}))\s*(?:[A-Z]{2}\.?|Florida|Georgia|Alabama|Tennessee|Michigan|Ohio|Texas|California|Pennsylvania|Virginia),?\s*\d{5}(?:-\d{4})?/i;
@@ -2070,7 +2136,9 @@ const ADDR_BLOCK_KEYS = new Set([
   "00 page xxxx",
   "00 primary power",
   "00 prop sign",
+  "00 sf original",
   "00 side letter",
+  "00 sign elevation",
   "00 signs center",
   "00 sq ft",
   "00 to be",
@@ -2078,14 +2146,19 @@ const ADDR_BLOCK_KEYS = new Set([
   "00 will be",
   "000 front view",
   "000 specifications for",
+  "0000 entry m",
   "0000 xxxx xxxx",
+  "00012 account approved",
+  "005 t h",
   "01 08 26",
+  "01 contractor customer",
   "01 revise measurements",
   "01 scale nts",
   "01 zip code",
   "02 22 26",
   "02 23 26",
   "02 scale nts",
+  "020 site address",
   "021 white w",
   "03 26 26",
   "03 30 26",
@@ -2133,11 +2206,13 @@ const ADDR_BLOCK_KEYS = new Set([
   "06 24 26",
   "06 26 26",
   "06 29 26",
+  "063 alum back",
   "063 alum backs",
   "063 aluminum back",
   "063 aluminum backs",
   "063 aluminum fabricated",
   "063 aluminum illumination",
+  "063 aluminum returns",
   "063 letters pre",
   "063 pre finished",
   "06786 int note",
@@ -2166,6 +2241,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "10 primary power",
   "10 size a",
   "10 size sales",
+  "10 support pole",
   "10 total facade",
   "100 of the",
   "100 tampa fl",
@@ -2192,6 +2268,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "12 ga stranded",
   "12 led power",
   "12 min thwn",
+  "12 night view",
   "12 o c",
   "12 primary electrical",
   "12 standard length",
@@ -2220,6 +2297,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "13 from the",
   "13 l x",
   "13 returns to",
+  "13 revision dates",
   "13 standard electrical",
   "130 commerce road",
   "132 mph wind",
@@ -2228,6 +2306,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "14 from terminal",
   "14 metal screws",
   "14 primary electrical",
+  "14 screw through",
   "140 l x",
   "140 mph risk",
   "140 mph wind",
@@ -2243,6 +2322,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "150 psf ft",
   "153 b steel",
   "157 dual color",
+  "1574 speedpro com",
   "16 acrylic face",
   "16 acrylic faces",
   "16 acrylic returns",
@@ -2274,6 +2354,8 @@ const ADDR_BLOCK_KEYS = new Set([
   "17 ds primary",
   "17 ds requirements",
   "17 ds sign",
+  "17282 fs scale",
+  "175 mph nec",
   "1771 industrial rd",
   "18 awg pltc",
   "18 awl wire",
@@ -2296,9 +2378,11 @@ const ADDR_BLOCK_KEYS = new Set([
   "20 amp disconnect",
   "20 amp external",
   "20 amp primary",
+  "20 amps circuit",
   "20 ft address",
   "20 matte white",
   "200 miami fl",
+  "2000 psf and",
   "2000 psf soil",
   "2008 signarama inc",
   "2014 with lockout",
@@ -2324,10 +2408,13 @@ const ADDR_BLOCK_KEYS = new Set([
   "2023 this is",
   "2023 with in",
   "2024 this is",
+  "2025 address acsignsco",
   "2025 address address",
   "2025 anicom signs",
   "2025 jobs p",
+  "2025 last revised",
   "2025 sales person",
+  "2025 scott h",
   "2025 this drawing",
   "2025 this proof",
   "2026 account address",
@@ -2337,17 +2424,26 @@ const ADDR_BLOCK_KEYS = new Set([
   "2026 ar phone",
   "2026 by kp",
   "2026 design bloombar",
+  "2026 design sunshine",
   "2026 drawn by",
   "2026 egan this",
   "2026 exterior sign",
   "2026 fit as",
   "2026 jg by",
+  "2026 jg doral",
   "2026 jg phone",
   "2026 jg this",
   "2026 joe knestrick",
+  "2026 last revised",
+  "2026 license es",
+  "2026 mco main",
+  "2026 n w",
   "2026 notice to",
+  "2026 poject address",
+  "2026 project name",
   "2026 revision dates",
   "2026 revisions project",
+  "2026 revisions r",
   "2026 s o",
   "2026 sales person",
   "2026 salesperson chris",
@@ -2376,8 +2472,10 @@ const ADDR_BLOCK_KEYS = new Set([
   "23 thwn as",
   "24 aluminum studs",
   "24 channel letters",
+  "24 location wet",
   "24 s f",
   "24 sq ft",
+  "24 ss threaded",
   "24 total sqft",
   "24 w x",
   "2406 ld acrylic",
@@ -2393,14 +2491,17 @@ const ADDR_BLOCK_KEYS = new Set([
   "25 rotated directional",
   "25 sq ft",
   "25 square feet",
+  "25 updated site",
   "25 w ft",
   "250 all of",
+  "250 psf ft",
   "250 sign constructed",
   "25301 celestial st",
   "26 add site",
   "26 approved with",
   "26 as noted",
   "26 as per",
+  "26 cdr renderings",
   "26 client approval",
   "26 contained herein",
   "26 date revision",
@@ -2408,6 +2509,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "26 es southeast",
   "26 ft proposed",
   "26 ft sign",
+  "26 install address",
   "26 install new",
   "26 jon hudspeth",
   "26 look different",
@@ -2415,8 +2517,10 @@ const ADDR_BLOCK_KEYS = new Set([
   "26 notes drawn",
   "26 nts corporateidsolutions",
   "26 original mdt",
+  "26 page xxxx",
   "26 please review",
   "26 print template",
+  "26 project name",
   "26 proofs and",
   "26 revise size",
   "26 revisions approval",
@@ -2428,6 +2532,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "26 this proof",
   "2631 n 31st",
   "2753 nw 87th",
+  "2757 c translucent",
   "277 v primary",
   "2784 wrights rd",
   "280 n p",
@@ -2435,6 +2540,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "286 sqft dedicated",
   "29 c to",
   "30 colors reflected",
+  "30 it is",
   "30 o c",
   "30 sets 3",
   "30 sq ft",
@@ -2449,6 +2555,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "32 pan head",
   "32 sq ft",
   "3200 n federal",
+  "32207 email customer",
   "32220 j auto",
   "3260 nw 23rd",
   "32609 www gainesvilleneon",
@@ -2461,24 +2568,38 @@ const ADDR_BLOCK_KEYS = new Set([
   "33 primary wire",
   "33 sq ft",
   "330 vscfl com",
+  "33009 location date",
   "33014 f o",
   "33014 no part",
+  "33025 artwork history",
+  "33025 sales associate",
   "33127 municipality miami",
   "33127 w e",
   "33144 or reproduced",
+  "33157 underwriters laboratories",
+  "33165 underwriters laboratories",
   "33167 or reproduced",
   "33172 miami fl",
+  "33178 city city",
+  "33186 municipality miami",
+  "33189 municipality cutler",
   "33314 gmsigninc aol",
   "33431 email gwadesign",
   "33461 nec standards",
+  "33487 boca raton",
   "33511 artwork history",
   "33756 this design",
   "33756 www fastsigns",
   "33771 www fastsigns",
+  "33801 sign area",
+  "33930 rev date",
   "34 sq ft",
   "34108 sales associate",
   "34205 ka parcel",
+  "34221 production of",
   "34787 email customer",
+  "34787 us artwork",
+  "34787 us sales",
   "34997 stuart fl",
   "35 sq ft",
   "3502 queen palm",
@@ -2494,11 +2615,13 @@ const ADDR_BLOCK_KEYS = new Set([
   "410 ss part",
   "411 7th st",
   "4162 st augustine",
+  "4242 www gardnersignscom",
   "436 specified winter",
   "4368 n federal",
   "440 naples fl",
   "4444 se commerce",
   "448 satin finish",
+  "46 ksi minextruded",
   "47 cradle to",
   "470 ansin blvd",
   "4749 info signaramaftl",
@@ -2506,12 +2629,14 @@ const ADDR_BLOCK_KEYS = new Set([
   "48 and will",
   "48 per f",
   "48 standards and",
+  "4889 electrical code",
   "49 burgundy to",
   "49 sq ft",
   "4920 w cypress",
   "50 c max",
   "50 ft input",
   "50 operates up",
+  "50 sq ft",
   "50 square feet",
   "5031 w grace",
   "5052 sign grade",
@@ -2531,6 +2656,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "600 of the",
   "600 ul and",
   "602 278 6286",
+  "605 structural pipe",
   "60560 jimmy john",
   "60630 loan this",
   "6225 old concord",
@@ -2541,6 +2667,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "66 square feet",
   "6631 east colonial",
   "67 sq ft",
+  "6800 www tbdsigns",
   "70 nec code",
   "7098 winter springs",
   "712 s missouri",
@@ -2550,6 +2677,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "727 797 1177",
   "7328 acrylic faces",
   "7328 white acrylic",
+  "7446 email nick",
   "75 embed total",
   "75 sq ft",
   "754 332 2263",
@@ -2574,6 +2702,7 @@ const ADDR_BLOCK_KEYS = new Set([
   "88 8 8",
   "88 existing sign",
   "8959 tyler boulevard",
+  "90689 mco main",
   "92 sq ft",
   "95 per hour",
   "95 signs awnings",
@@ -3119,6 +3248,16 @@ function extractFromLines(lines, words) {
       if (onlyZip) zipFromLabel = onlyZip[1];
     }
   }
+  // One-row "CITY: SARASOTA STATE: FL ZIP: 34237" (Gulf Coast Signs and other
+  // title blocks): the City: value runs on through the State:/Zip: labels.
+  // Fold them into "Sarasota, FL" — the zip is re-attached from ZIP_LABEL_RX
+  // below — so the joined address parses instead of failing scoreAddr.
+  if (cityFromLabel && /\bState\s*:/i.test(cityFromLabel)) {
+    cityFromLabel = cityFromLabel
+      .replace(/\s*\bZip(?:\s*code)?\s*:.*$/i, "")
+      .replace(/\s*,?\s*\bState\s*:\s*/i, ", ")
+      .replace(/[,\s]+$/, "").trim();
+  }
   if (cityFromLabel) {
     const BARE_STREET_RX = /^\d{2,6}\s+[A-Za-z]/;
     for (const cand of [...addrCands]) {
@@ -3559,6 +3698,27 @@ function extractFromLines(lines, words) {
   /* ═══ SYNCED-CORE-END ═══ */
 
   // ── pdf.js: extract text + word positions from page 1 (and page 2 if page 1 sparse)
+  // Rotated pages (/Rotate 90/180/270): pdf.js item transforms are in the
+  // UNROTATED page space, so on a page whose text reads upright once displayed,
+  // title-block rows come out as columns and a label never shares a line with
+  // its value ("JOB NAME:" / "GUNSTER"). Map such a page into displayed space,
+  // but only when that is the frame its text actually reads horizontally in
+  // (ties go to the displayed frame; a page whose text is drawn sideways on
+  // purpose keeps the raw frame). Returns null for unrotated pages, which keep
+  // the original coordinate math exactly.
+  function displayFrameFor(page, viewport, items) {
+    if (!((page.rotate || 0) % 360)) return null;
+    const T = it => pdfjsLib.Util.transform(viewport.transform, it.transform);
+    const horiz = m => Math.abs(m[1]) < 0.2 * Math.abs(m[0]);
+    let dispH = 0, rawH = 0;
+    for (const it of items) {
+      if (!it.str || !it.str.trim()) continue;
+      if (horiz(T(it))) dispH++;
+      if (horiz(it.transform)) rawH++;
+    }
+    return dispH >= rawH ? T : null;
+  }
+
   async function extractTextWithPositions(pdfBytes) {
     if (!window.pdfjsLib) throw new Error("pdf.js not loaded");
     // pdf.js detaches the ArrayBuffer on load — pass a fresh copy so the
@@ -3584,12 +3744,13 @@ function extractFromLines(lines, words) {
         charFragmented = true;
       }
       // Group by y-bucket into lines
+      const toDisp = displayFrameFor(page, viewport, content.items);
       const buckets = new Map();
       for (const it of content.items) {
         if (!it.str || !it.str.trim()) continue;
-        const tx = it.transform;
-        const x = tx[4], yFromBottom = tx[5];
-        const y = viewport.height - yFromBottom;
+        const tx = toDisp ? toDisp(it) : it.transform;
+        const x = tx[4];
+        const y = toDisp ? tx[5] : viewport.height - tx[5];
         const fs = Math.hypot(tx[0], tx[1]) || 8;
         const xEnd = x + (it.width || (it.str.length || 1) * fs * 0.5);
         const key = Math.round(y / 3);
