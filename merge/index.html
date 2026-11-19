@@ -76,6 +76,8 @@
   .override-row.open{max-height:110px;opacity:1;margin-top:10px}
   .override-row.two-col{grid-template-columns:1fr 1fr}
   .override-row .field label{color:var(--warn);opacity:.8}
+  .psf-src{margin-left:5px;font-size:9px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;color:var(--text-dim)}
+  .psf-src.manual{color:var(--warn)}
   .override-toggle{display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:11px;border-top:1px solid var(--border);cursor:pointer;user-select:none}
   .override-toggle input[type=checkbox]{accent-color:var(--warn);width:14px;height:14px;cursor:pointer}
   .override-toggle span{font-size:13px;font-weight:500;color:var(--text-dim);letter-spacing:.2px}
@@ -404,12 +406,12 @@
       <span>Override sign height &amp; pressure values</span>
     </label>
     <div class="override-row" id="overrideRow">
-      <div class="field"><label>Sign Height</label>
-        <input type="text" id="overrideHeight" placeholder="e.g. 25"></div>
-      <div class="field"><label>Pressure 1</label>
-        <input type="text" id="overridePressure1" placeholder="Zone 4 / single" oninput="updateBtn()"></div>
-      <div class="field" id="p2Field"><label>Pressure 2</label>
-        <input type="text" id="overridePressure2" placeholder="Zone 5 (Wall only)" oninput="updateBtn()"></div>
+      <div class="field"><label>Sign Height (ft)</label>
+        <input type="text" id="overrideHeight" placeholder="e.g. 25" oninput="onOverrideHeightInput()"></div>
+      <div class="field"><label>Pressure 1<span class="psf-src" id="p1Src"></span></label>
+        <input type="text" id="overridePressure1" placeholder="Zone 4 / single" oninput="onOverridePsfInput(this)"></div>
+      <div class="field" id="p2Field"><label>Pressure 2<span class="psf-src" id="p2Src"></span></label>
+        <input type="text" id="overridePressure2" placeholder="Zone 5 (Wall only)" oninput="onOverridePsfInput(this)"></div>
     </div>
     <div class="fallback-notice" id="fallbackNotice"></div>
     <div class="validation-msg" id="validationMsg"></div>
@@ -622,7 +624,8 @@ function renderPsf(){
   const v=x=>x?`<span class="psf-v">${String(x).replace(/[<>&]/g,"")}</span> psf`:`<span class="psf-blank">___</span> psf`;
   const wind=st==="Wall sign"?`Wind Pressures:  Z4: ${v(p1||baked[0])}   Z5: ${v(p2||baked[1])}`:`Wind Pressure:  ${v(p1||baked[0])}`;
   const vt=(String(r.tornadoOpt||"").match(/^VT (\d+)mph/)||[])[1],tbl=tornadoTableFor(st);
-  const torn=vt&&tbl?v(tbl[vt]):"N/A";
+  const tAdj=vt&&tbl?overrideTornadoAdjust():null;   /* override height can change it */
+  const torn=vt&&tbl?v(tAdj?tAdj.to:tbl[vt]):"N/A";
   el.innerHTML=`${wind}      |       Tornado:  ${torn}`;
   el.className="psf-readout on";
 }
@@ -639,6 +642,87 @@ function autoTornado(ws,rc,ex){
   if(ratio<lim) return{opt:"N/A",why:`${txt} < ${lim} (Exp ${ex}) — tornado eval not req'd`};
   return{opt:`VT ${vt}mph 1M sf`,why:`${txt} ≥ ${lim} (Exp ${ex}) — tornado req'd, Ae 1,000,000 sf`};
 }
+/* ── Calculated pressures (override row) ───────────────────────────
+   Same formulas as the 2026 calc workbooks (ASCE 7-22, ASD 0.6):
+   Wall Flush "WL" sheet (C&C, A = 10 sf, GCpi 0) and FreeStdg "WG" (monument,
+   Cf 1.55) / "WE" (pylon, Cf 1.85), G 0.85, Kd 0.85, Kzt = Ke = 1.
+   They reproduce every baked template value at the template heights below.
+   Zone 4 isn't in the workbook; it is ASCE Fig. 30.3-1 / 30.5-1 at 10 sf
+   (−1.1, or −0.9 above 60 ft), which matches the templates' Z4 values.
+   Kz uses z ≥ 15 ft for every sign type (the FreeStdg sheets do; the Wall
+   sheet has no 15-ft floor; ASCE 26.10-1 does). */
+const PSF_CALC={exp:{B:{a:7.5,zg:3280},C:{a:9.8,zg:2460},D:{a:11.5,zg:1935}},
+  asd:0.6,kd:0.85,G:0.85,cf:{monument:1.55,pylon:1.85},min:16*0.6,
+  /* the heights the templates' baked psf were calculated for */
+  tplHeight:{'Wall sign':30,'Monument at grade':15,'15-ft Pylon above grade':15,'30-ft Pylon above grade':30}};
+function psfKz(h,ex){const e=PSF_CALC.exp[ex]||PSF_CALC.exp.C;return 2.41*Math.pow(Math.max(h,15)/e.zg,2/e.a);}
+/* Wall C&C GCp at A = 10 sf (workbook S6 for Zone 5). */
+function wallGCp(zone,h){
+  const A=10,L=Math.log10(A);
+  if(zone===5) return h<=60?Math.min(-0.8,Math.max(-1.4,-1.7532+0.3532*L)):Math.min(-1,Math.max(-1.8,-2.5445+0.5723*L));
+  return h<=60?Math.min(-0.8,Math.max(-1.1,-1.2766+0.1766*L)):Math.min(-0.7,Math.max(-0.9,-1.0861+0.1431*L));
+}
+/* → {p1, p2|null} in psf (numbers), or null for Interior / bad input. */
+function calcWindPsf(st,V,ex,h){
+  if(!V||!h||!(st in PSF_CALC.tplHeight)) return null;
+  const qz=0.00256*psfKz(h,ex)*V*V*PSF_CALC.asd,fl=V<10?0:PSF_CALC.min;
+  if(st==='Wall sign'){
+    const p=z=>Math.max(Math.abs(qz*PSF_CALC.kd*wallGCp(z,h)),fl);
+    return{p1:p(4),p2:p(5)};
+  }
+  const cf=st==='Monument at grade'?PSF_CALC.cf.monument:PSF_CALC.cf.pylon;
+  return{p1:Math.max(qz*PSF_CALC.kd*PSF_CALC.G*cf,fl),p2:null};
+}
+/* Tornado psf (workbook row 11/13): KzT = 1 up to 200 ft. Wall: KdT 1,
+   |GCpT(5) − GCpiT 0.55|; freestanding: KdT 0.8, GT 0.85, Cf. The floor is
+   16.0 psf, as the templates / TORNADO_PSF print (the workbooks use 16×0.6). */
+function calcTornadoPsf(st,vt,h){
+  if(!vt||!h) return null;
+  const kzt=h<=200?1:h>328?0.9:Math.pow((2820-h)/2620,2),qzT=0.00256*kzt*vt*vt*PSF_CALC.asd;
+  let p;
+  if(st==='Wall sign') p=qzT*1*Math.abs(wallGCp(5,h)-0.55);
+  else if(st==='Monument at grade') p=qzT*0.8*0.85*PSF_CALC.cf.monument;
+  else if(/Pylon/.test(st)) p=qzT*0.8*0.85*PSF_CALC.cf.pylon;
+  else return null;
+  return Math.max(p,16);
+}
+/* The sign height the calc uses: the override height, else the template's. */
+function overrideSignHeight(st){
+  const on=document.getElementById('overrideCheck').checked;
+  const h=on?parseFloat(document.getElementById('overrideHeight').value):NaN;
+  return h>0?h:PSF_CALC.tplHeight[st];
+}
+/* Tornado psf for the drawing when the override height changes it:
+   {from: template value, to: new value}, else null. */
+function overrideTornadoAdjust(){
+  const st=document.getElementById('signType').value,r=resolve();
+  const vt=+((String(r.tornadoOpt||'').match(/^VT (\d+)mph/)||[])[1]||0);
+  const tbl=tornadoTableFor(st);
+  if(!vt||!tbl||!tbl[vt]) return null;
+  const to=calcTornadoPsf(st,vt,overrideSignHeight(st));
+  if(to==null) return null;
+  const toS=to.toFixed(1);
+  return toS===tbl[vt]?null:{from:tbl[vt],to:toS};
+}
+/* Fill Pressure 1/2 from the calc unless the user typed a value (sticky until
+   the field is cleared or the override is switched off). */
+function autoFillPressures(){
+  const st=document.getElementById('signType').value;
+  const on=document.getElementById('overrideCheck').checked&&st!=='Interior';
+  const c=on?calcWindPsf(st,+document.getElementById('windSpeed').value,document.getElementById('exposure').value,overrideSignHeight(st)):null;
+  [['overridePressure1','p1Src',c&&c.p1],['overridePressure2','p2Src',c&&c.p2]].forEach(([id,tag,val])=>{
+    const el=document.getElementById(id),t=document.getElementById(tag);
+    if(el.dataset.manual==='1'){t.textContent='manual';t.className='psf-src manual';return;}
+    el.value=on&&val!=null?val.toFixed(1):'';
+    t.textContent=on&&val!=null?'calc':'';t.className='psf-src';
+    t.title=on&&val!=null?`ASCE 7-22 per the calc workbooks, sign height ${overrideSignHeight(st)} ft`:'';
+  });
+}
+function onOverridePsfInput(el){
+  el.dataset.manual=el.value.trim()?'1':'';     // cleared → back to the calc
+  autoFillPressures();renderPsf();updateBtn();
+}
+function onOverrideHeightInput(){autoFillPressures();renderPsf();updateBtn();}
 function computeLayers(){
   const{wind,ok,layers,riskCat,exact,fallback}=resolve();
   const m=document.getElementById("validationMsg");
@@ -648,7 +732,7 @@ function computeLayers(){
   if(!exact&&fallback){
     /* Layer doesn't exist — show fallback notice and auto-open pressure fields */
     m.className="validation-msg";
-    fb.innerHTML=`⚠ No layer <span class="fb-layer">${wind}</span> in template — using <span class="fb-layer">${fallback}</span> as base. Enter pressure values below${needsP2?' (P1 &amp; P2 required)':' (P1 required)'}.`;
+    fb.innerHTML=`⚠ No layer <span class="fb-layer">${wind}</span> in template — using <span class="fb-layer">${fallback}</span> as base. Pressures below are calculated (ASCE 7-22, calc workbooks) — check them${needsP2?' (P1 &amp; P2 required)':' (P1 required)'}.`;
     fb.className="fallback-notice show";
     /* Auto-open override row and check the checkbox */
     document.getElementById('overrideCheck').checked=true;
@@ -667,9 +751,10 @@ function computeLayers(){
   const r=resolve(),tOpt=document.getElementById("tornadoAutoOpt");
   if(r.tornadoAuto){tOpt.textContent=`Auto · ${r.tornadoOpt==="N/A"?"N/A":r.tornadoOpt.replace(/^VT (\d+)mph (\S+) sf$/,"VT $1 / $2")}`;document.getElementById("tornado").title=r.tornadoAuto.why;}
   else tOpt.textContent="Auto";
+  updateP2Visibility();
+  autoFillPressures();
   renderPsf();
   updateBtn();
-  updateP2Visibility();
   try{piRenderWind();}catch(e){/* wind module not initialised yet */}
 }
 
@@ -681,10 +766,13 @@ function toggleOverrides(){
   document.getElementById('overrideRow').classList.toggle('open', open);
   if (!open) {
     document.getElementById('overrideHeight').value = '';
-    document.getElementById('overridePressure1').value = '';
-    document.getElementById('overridePressure2').value = '';
+    ['overridePressure1','overridePressure2'].forEach(id => {
+      const el = document.getElementById(id); el.value = ''; el.dataset.manual = '';
+    });
   }
   updateP2Visibility();
+  autoFillPressures();
+  renderPsf();
   updateBtn();
 }
 let _interiorSave = null;
@@ -740,7 +828,7 @@ function updateP2Visibility(){
   const row = document.getElementById('overrideRow');
   p2.style.display = showP2 ? '' : 'none';
   row.classList.toggle('two-col', !showP2);
-  if (!showP2) document.getElementById('overridePressure2').value = '';
+  if (!showP2) { const e2 = document.getElementById('overridePressure2'); e2.value = ''; e2.dataset.manual = ''; }
 }
 
 /* ═══ File handling ══════════════════════════════════════════════ */
@@ -2513,7 +2601,15 @@ async function doMerge() {
     /* Rewrite tornado psf for Monument/Pylon on an older (4T-*) template only
        (null → keep the template's values). */
     const tornadoLayer = resolve().tornado || '';
-    const tornadoRemap = /^4T-(?!NA$)/.test(tornadoLayer) ? tornadoRemapFor(signTypeVal) : null;
+    let tornadoRemap = /^4T-(?!NA$)/.test(tornadoLayer) ? tornadoRemapFor(signTypeVal) : null;
+    /* Override sign height can change the tornado psf (wall above 60 ft, any
+       sign above 200 ft): rewrite the sign type's template value → calculated. */
+    const tornadoAdj = overrideTornadoAdjust();
+    if (tornadoAdj) {
+      if (tornadoRemap) { for (const k in tornadoRemap) if (tornadoRemap[k] === tornadoAdj.from) tornadoRemap[k] = tornadoAdj.to; }
+      else tornadoRemap = { [tornadoAdj.from]: tornadoAdj.to };
+      console.log(`Tornado psf for override height: ${tornadoAdj.from} → ${tornadoAdj.to}`);
+    }
     if (tornadoRemap && tornadoFont) {
       let tornPatch = 0;
       for (let si = 0; si < tplStreamRefs.length; si++) {
