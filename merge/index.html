@@ -78,6 +78,25 @@
   .override-row .field label{color:var(--warn);opacity:.8}
   .psf-src{margin-left:5px;font-size:9px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;color:var(--text-dim)}
   .psf-src.manual{color:var(--warn)}
+  /* Layer Settings page ranges */
+  .lg-bar{margin:-4px 0 12px}
+  .lg-tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .lg-tab{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:border-color .15s}
+  .lg-tab:hover{color:var(--text)}
+  .lg-tab.on{border-color:var(--lg);color:var(--text);box-shadow:inset 0 -2px 0 var(--lg)}
+  .lg-dot{width:16px;height:16px;border-radius:4px;background:var(--lg);color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+  .lg-pg{font-size:10px;font-family:'JetBrains Mono',monospace;opacity:.75}
+  .lg-warn{color:var(--warn)}
+  .lg-add{padding:5px 10px;border-radius:7px;border:1px dashed var(--border);background:none;color:var(--text-dim);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif}
+  .lg-add:hover{color:var(--accent);border-color:var(--accent)}
+  .lg-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .lg-lbl{font-size:11px;font-weight:600;color:var(--text-dim)}
+  .lg-range{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:5px 9px;font-size:12px;color:var(--text);width:150px;font-family:'JetBrains Mono',monospace}
+  .lg-range:focus{outline:none;border-color:var(--accent)}
+  .lg-note{font-size:11px;color:var(--text-dim)}
+  .lg-rm{margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-dim);font-size:11px;padding:4px 9px;cursor:pointer}
+  .lg-rm:hover{color:var(--error);border-color:var(--error)}
+  .lg-chip{font-size:9px;font-weight:700;color:#fff;border-radius:3px;padding:1px 4px;line-height:1.3}
   .override-toggle{display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:11px;border-top:1px solid var(--border);cursor:pointer;user-select:none}
   .override-toggle input[type=checkbox]{accent-color:var(--warn);width:14px;height:14px;cursor:pointer}
   .override-toggle span{font-size:13px;font-weight:500;color:var(--text-dim);letter-spacing:.2px}
@@ -146,14 +165,20 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;min-width:0}
   .addr-chip:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
   .addr-chip.selected{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
-  /* Page-preview hover popup (anchored to the Vector/Raster page buttons) */
-  #piThumbPopup{position:fixed;z-index:9999;pointer-events:none;border-radius:8px;overflow:hidden;
-    box-shadow:0 8px 32px rgba(0,0,0,.55);border:1px solid var(--border);display:none;
-    width:832px;height:624px;background:var(--surface-2)}
-  #piThumbPopup canvas{display:block;width:100%;height:100%;object-fit:contain}
-  #piThumbPopup .pt-spinner{position:absolute;inset:0;display:flex;align-items:center;
-    justify-content:center;font-size:12px;color:var(--text-dim);font-family:'DM Sans',sans-serif;
-    background:var(--surface-2)}
+  /* Page preview pane (beside the page chips) + zoom lightbox */
+  .cp-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,46%);gap:12px;align-items:start}
+  @media(max-width:700px){.cp-body{grid-template-columns:1fr}}
+  .cp-preview{position:sticky;top:8px;aspect-ratio:17/11.6;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:zoom-in;display:flex;flex-direction:column}
+  .cp-prev-view{flex:1;min-height:0;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none}
+  .cp-prev-view.zoomed{display:block;cursor:grab}
+  .cp-prev-view.zoomed:active{cursor:grabbing}
+  .cp-prev-view canvas{display:block;flex:none;background:#fff}
+  .cp-preview:not(.has) .cp-prev-view{display:none}
+  .cp-preview:hover{border-color:var(--accent)}
+  .cp-prev-cap{flex:none;height:18px;line-height:18px;font-size:10px;text-align:center;color:var(--text-dim);font-family:'JetBrains Mono',monospace;background:var(--surface-2);border-top:1px solid var(--border)}
+  .cp-preview:not(.has) .cp-prev-cap{flex:1;height:auto;display:flex;align-items:center;justify-content:center;border-top:none;background:transparent}
+  .cp-page.previewing{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .pt-spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-dim);font-family:'DM Sans',sans-serif;background:rgba(15,17,23,.55);pointer-events:none}
   .pi-status{font-size:11px;color:var(--text-dim);padding:8px 12px;background:var(--surface-2);border-radius:6px;display:none;flex:1;min-width:0}
   .pi-status.visible{display:block}
   .pi-status.working{color:var(--accent)}
@@ -296,7 +321,14 @@
         </div>
       </div>
       <div class="cp-files" id="cpFiles"></div>
-      <div class="cp-pages" id="cpPages"></div>
+      <div class="cp-body">
+        <div class="cp-pages" id="cpPages"></div>
+        <div class="cp-preview" id="cpPreview">
+          <div class="cp-prev-view" id="cpPrevView"><canvas id="cpPrevCanvas"></canvas></div>
+          <div class="pt-spinner" id="cpPrevSpin" style="display:none">Rendering…</div>
+          <div class="cp-prev-cap" id="cpPrevCap">Hover a page to preview · click to zoom</div>
+        </div>
+      </div>
       <div class="cp-dpi">
         <label>Raster DPI</label>
         <select id="rasterDpiSel" onchange="rasterDPI=+this.value">
@@ -352,6 +384,7 @@
   </div>
   <div class="card">
     <div class="card-title"><span class="num">2</span> Layer Settings</div>
+    <div class="lg-bar" id="lgBar"></div>
     <div class="grid-5">
       <div class="field"><label>Sign Type</label>
         <select id="signType" onchange="onSignTypeChange()">
@@ -553,10 +586,10 @@ function findFallbackLayer(st,ws){
   }
   return candidates.length?candidates[0]:null;
 }
-function resolve(){
-  const st=document.getElementById("signType").value,ws=+document.getElementById("windSpeed").value;
-  const ex=document.getElementById("exposure").value,tnSel=document.getElementById("tornado").value;
-  const rcSel=document.getElementById("riskCategory").value;
+function resolve(inp){
+  /* inp: {st,ws,ex,tnSel,rcSel} for a page range (LG.resolveInput); default = the card */
+  const $v=id=>document.getElementById(id).value;
+  const {st,ws,ex,tnSel,rcSel}=inp||{st:$v("signType"),ws:+$v("windSpeed"),ex:$v("exposure"),tnSel:$v("tornado"),rcSel:$v("riskCategory")};
   const autoRisk=WIND_RISK[ws]||2;
   let riskCat=rcSel==="auto"?autoRisk:+rcSel;
   let w=getWindLayer(st,ws,ex,rcSel==="auto"?0:riskCat);
@@ -755,6 +788,7 @@ function computeLayers(){
   autoFillPressures();
   renderPsf();
   updateBtn();
+  try{LG.render();}catch(e){/* LG not initialised yet */}
   try{piRenderWind();}catch(e){/* wind module not initialised yet */}
 }
 
@@ -830,6 +864,165 @@ function updateP2Visibility(){
   row.classList.toggle('two-col', !showP2);
   if (!showP2) { const e2 = document.getElementById('overridePressure2'); e2.value = ''; e2.dataset.manual = ''; }
 }
+
+/* ═══ Layer Settings per page range ════════════════════════════════
+   One drawing can hold several sign types (wall + monument pages, say), each
+   with its own wind loads. Layer Settings can be split into ranges: range A
+   covers every page not claimed by another range, and B, C… each list their
+   pages ("5-11, 13", numbered as the page chips are). The card always shows
+   the ACTIVE range; its tabs switch which range the card edits. A page carries
+   its range with it (entry.lg) when pages are reordered, paired or split.
+   doMerge gives every extra range its own patched copy of the template
+   streams and its own copies of the template layers (see doMerge). */
+const LG = {
+  groups: [{ id: 0, s: null }], active: 0, nextId: 1,
+  COLORS: ['#4a6cf7', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6', '#06b6d4', '#ef4444', '#84cc16'],
+  idx(id) { return this.groups.findIndex(g => g.id === id); },
+  letter(id) { return String.fromCharCode(65 + Math.max(0, this.idx(id))); },
+  color(id) { return this.COLORS[Math.max(0, this.idx(id)) % this.COLORS.length]; },
+  multi() { return this.groups.length > 1; },
+  /* the range a page belongs to (an unknown/removed range → A) */
+  gidOf(e) { return e && e.lg != null && this.idx(e.lg) >= 0 ? e.lg : this.groups[0].id; },
+
+  /* Card ⇄ settings */
+  capture() {
+    const $ = id => document.getElementById(id), st = $('signType').value;
+    const sv = (st === 'Interior' && _interiorSave) ? _interiorSave : null;
+    return {
+      st, ws: sv ? sv.ws : $('windSpeed').value, ex: sv ? sv.exposure : $('exposure').value,
+      rc: sv ? sv.riskCategory : $('riskCategory').value, tn: sv ? sv.tornado : $('tornado').value,
+      ovOn: $('overrideCheck').checked, ovH: $('overrideHeight').value,
+      p1: $('overridePressure1').value, p2: $('overridePressure2').value,
+      p1m: $('overridePressure1').dataset.manual || '', p2m: $('overridePressure2').dataset.manual || '',
+      wsManual: PI_WIND.wsManual, expManual: PI_WIND.expManual
+    };
+  },
+  apply(s) {
+    const $ = id => document.getElementById(id);
+    /* leave Interior mode cleanly (onSignTypeChange injected N/A options) */
+    ['exposure', 'riskCategory', 'tornado'].forEach(id => {
+      const sel = $(id); sel.disabled = false;
+      const inj = sel.querySelector('option[data-injected]'); if (inj) sel.removeChild(inj);
+    });
+    $('windSpeedDrop').classList.remove('wind-drop-na');
+    _interiorSave = null;
+    piSetWindSpeed(s.ws); $('exposure').value = s.ex; $('riskCategory').value = s.rc; $('tornado').value = s.tn;
+    PI_WIND.wsManual = s.wsManual; PI_WIND.expManual = s.expManual;
+    $('signType').value = s.st;
+    $('overrideCheck').checked = s.ovOn; $('overrideRow').classList.toggle('open', s.ovOn);
+    $('overrideHeight').value = s.ovH;
+    $('overridePressure1').value = s.p1; $('overridePressure1').dataset.manual = s.p1m;
+    $('overridePressure2').value = s.p2; $('overridePressure2').dataset.manual = s.p2m;
+    if (s.st === 'Interior') onSignTypeChange();   // re-injects N/A, then computeLayers
+    else computeLayers();
+  },
+  /* settings of any range (the active one is read live from the card) */
+  settingsOf(id) { return id === this.active ? this.capture() : this.groups[this.idx(id)].s; },
+  /* resolve() input for a range, without touching the card */
+  resolveInput(id) {
+    const s = this.settingsOf(id);
+    return { st: s.st, ws: +s.ws, ex: s.ex, tnSel: s.tn, rcSel: s.rc };
+  },
+  select(id) {
+    if (id === this.active || this.idx(id) < 0) return;
+    this.groups[this.idx(this.active)].s = this.capture();
+    this.active = id;
+    this.apply(this.groups[this.idx(id)].s);
+    this.render();
+  },
+  add() {
+    const cur = this.capture();
+    this.groups[this.idx(this.active)].s = cur;
+    const s = { ...cur, ovOn: false, ovH: '', p1: '', p2: '', p1m: '', p2m: '' };
+    const id = this.nextId++;
+    this.groups.push({ id, s });
+    this.active = id;
+    this.apply(s);
+    this.render();
+    renderComplexityUI();
+    setTimeout(() => { const r = document.getElementById('lgRange'); if (r) r.focus(); }, 0);
+  },
+  remove(id) {
+    const i = this.idx(id); if (i <= 0) return;
+    pageEntries.forEach(e => { if (e.lg === id) e.lg = this.groups[0].id; });
+    const wasActive = id === this.active;
+    if (wasActive) { this.active = this.groups[0].id; }
+    this.groups.splice(i, 1);
+    if (wasActive) this.apply(this.groups[0].s || this.capture());
+    this.render(); renderComplexityUI(); updateBtn();
+  },
+  reset() {
+    if (this.multi() && this.active !== this.groups[0].id) {
+      this.active = this.groups[0].id;
+      if (this.groups[0].s) this.apply(this.groups[0].s);
+    }
+    this.groups = [{ id: this.groups[0].id, s: null }];
+    this.render();
+  },
+  /* "5-11, 13" → this range; pages that dropped out go back to A */
+  setRange(id, text) {
+    const n = pageEntries.length, want = new Set();
+    for (const tok of String(text).split(/[,;\s]+/).filter(Boolean)) {
+      const m = tok.match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/); if (!m) continue;
+      let a = +m[1], b = m[2] ? +m[2] : a; if (a > b) [a, b] = [b, a];
+      for (let k = Math.max(1, a); k <= Math.min(n, b); k++) want.add(k - 1);
+    }
+    pageEntries.forEach((e, i) => {
+      if (want.has(i)) e.lg = id;
+      else if (this.gidOf(e) === id) e.lg = this.groups[0].id;
+    });
+    this.render(); renderComplexityUI(); updateBtn();
+  },
+  pagesOf(id) { const out = []; pageEntries.forEach((e, i) => { if (this.gidOf(e) === id) out.push(i + 1); }); return out; },
+  fmtPages(list) {
+    const out = []; let i = 0;
+    while (i < list.length) { let j = i; while (j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+      out.push(j > i ? `${list[i]}–${list[j]}` : `${list[i]}`); i = j + 1; }
+    return out.join(', ');
+  },
+  /* ranges that have pages, in order of their first page */
+  plan() {
+    const seen = new Map();
+    pageEntries.forEach((e, i) => { const g = this.gidOf(e); if (!seen.has(g)) seen.set(g, []); seen.get(g).push(i); });
+    if (!seen.size) seen.set(this.groups[0].id, []);
+    return [...seen].map(([gid, pages]) => ({ gid, pages }));
+  },
+  /* every range with pages resolves to a valid layer set */
+  allOk() {
+    return this.plan().every(({ gid }) => { const r = resolve(this.resolveInput(gid)); return !!r.ok; });
+  },
+  shortType(st) { return ({ 'Wall sign': 'Wall', 'Monument at grade': 'Monument', '15-ft Pylon above grade': '15′ Pylon', '30-ft Pylon above grade': '30′ Pylon', 'Interior': 'Interior' })[st] || st; },
+  render() {
+    const bar = document.getElementById('lgBar'); if (!bar) return;
+    const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+    if (!this.multi()) {
+      bar.innerHTML = `<button type="button" class="lg-add" onclick="LG.add()" title="Give some pages different layer settings (e.g. a monument page in a wall-sign drawing)">＋ Different settings for some pages</button>`;
+      return;
+    }
+    const tabs = this.groups.map(g => {
+      const s = this.settingsOf(g.id), pages = this.pagesOf(g.id);
+      const ok = !pages.length || resolve(this.resolveInput(g.id)).ok;
+      const pg = pages.length ? `Pg ${this.fmtPages(pages)}` : 'no pages';
+      return `<button type="button" class="lg-tab${g.id === this.active ? ' on' : ''}" style="--lg:${this.color(g.id)}" onclick="LG.select(${g.id})" title="${esc(pg)}">` +
+        `<span class="lg-dot">${this.letter(g.id)}</span>${esc(this.shortType(s.st))} ${s.st === 'Interior' ? '' : esc(s.ws + (s.ex || ''))}` +
+        `<span class="lg-pg">${esc(pg)}</span>${ok ? '' : '<span class="lg-warn" title="No layer for these settings">⚠</span>'}</button>`;
+    }).join('');
+    const a = this.active, isA = a === this.groups[0].id;
+    const row = isA
+      ? `<span class="lg-note">Range A covers every page not listed in another range: ${esc(this.fmtPages(this.pagesOf(a)) || 'none')}</span>`
+      : `<label class="lg-lbl" for="lgRange">Pages</label><input type="text" id="lgRange" class="lg-range" placeholder="e.g. 5-11, 13" value="${esc(this.fmtPages(this.pagesOf(a)).replace(/–/g, '-'))}" ` +
+        `onchange="LG.setRange(${a}, this.value)" onkeydown="if(event.key==='Enter'){this.blur();}">` +
+        `<span class="lg-note">numbered as the page chips</span>` +
+        `<button type="button" class="lg-rm" onclick="LG.remove(${a})" title="Remove this range (its pages go back to range A)">✕ Remove range</button>`;
+    const tabsHtml = `${tabs}<button type="button" class="lg-add" onclick="LG.add()" title="Add another page range">＋ Range</button>`;
+    /* don't rebuild the Pages box under the user's cursor (an address estimate
+       can re-run computeLayers while they type) */
+    const typing = document.activeElement && document.activeElement.id === 'lgRange' && bar.dataset.active === String(a);
+    if (typing && bar.querySelector('.lg-tabs')) { bar.querySelector('.lg-tabs').innerHTML = tabsHtml; return; }
+    bar.dataset.active = String(a);
+    bar.innerHTML = `<div class="lg-tabs">${tabsHtml}</div><div class="lg-row">${row}</div>`;
+  }
+};
 
 /* ═══ File handling ══════════════════════════════════════════════ */
 let sourceBytes=null,templateBytes=null;
@@ -926,7 +1119,8 @@ function makePairEntry(a, b) {
     fileIdx: a.fileIdx, srcPage: a.srcPage, parts: [a, b],
     ops: a.ops + b.ops, ocg, shading: !!(a.shading || b.shading),
     raster: !!(a.raster || b.raster || ocg),
-    w: da.w + db.w, h: Math.max(da.h, db.h), rotate: 0, textDir: null
+    w: da.w + db.w, h: Math.max(da.h, db.h), rotate: 0, textDir: null,
+    lg: a.lg   /* the sheet keeps the first page's layer range */
   };
 }
 function pairWithNext(i) {
@@ -938,7 +1132,7 @@ function pairWithNext(i) {
 function splitPair(i) {
   const e = pageEntries[i];
   if (!e || !e.parts) return;
-  e.parts.forEach(p => { p.raster = e.raster || p.ocg; });
+  e.parts.forEach(p => { p.raster = e.raster || p.ocg; p.lg = e.lg; });
   pageEntries.splice(i, 1, ...e.parts);
   onPageOrderChanged();
 }
@@ -1036,7 +1230,8 @@ function updateBtn(){
     if(!p1)pressOk=false;
     if(needsP2&&!p2)pressOk=false;
   }
-  document.getElementById("btnMerge").disabled=!(pageEntries.length&&templateBytes&&r.ok&&pressOk);
+  const rangesOk=(typeof LG!=='undefined'&&LG.multi())?LG.allOk():r.ok;
+  document.getElementById("btnMerge").disabled=!(pageEntries.length&&templateBytes&&rangesOk&&pressOk);
 }
 /* ═══ Page complexity analysis ═══════════════════════════════════
    Uses pdf.js getOperatorList() to count the total number of PDF
@@ -1322,6 +1517,7 @@ function renderComplexityUI() {
       `<span class="cp-grip">⠿</span>` +
       `<span class="cp-icon">${icon}</span>` +
       `<span class="cp-lbl">${lbl}</span>` +
+      (LG.multi() ? `<span class="lg-chip" style="background:${LG.color(LG.gidOf(e))}" title="Layer Settings range ${LG.letter(LG.gidOf(e))}">${LG.letter(LG.gidOf(e))}</span>` : '') +
       ((multi || isPair) ? `<span class="cp-src">${multi ? srcTag : 'p' + parts.map(p => p.srcPage + 1).join('+')}</span>` : '') +
       `<span class="cp-mode">${mode}</span>` +
       `<span class="cp-ops">${ops}</span>` +
@@ -1383,13 +1579,14 @@ function renderComplexityUI() {
       movePageTo(from, i + (after ? 1 : 0));
     });
 
-    // Hover → cursor-anchored full-page preview, rendered from the ORIGINAL file
+    // Hover → page shows in the preview pane, rendered from the ORIGINAL file
     const key = parts.map(p => `${p.fileIdx}:${p.srcPage}`).join('+');
-    btn.addEventListener('mouseenter', ev => PagePreview.show(key, ev));
-    btn.addEventListener('mousemove',  ev => PagePreview.move(ev));
-    btn.addEventListener('mouseleave', () => PagePreview.hide());
+    btn.addEventListener('mouseenter', () => PagePreview.hover(key, i));
+    btn.addEventListener('mouseleave', () => PagePreview.leave());
     cpPgs.appendChild(btn);
   });
+  PagePreview.refresh();   // pane stays on the page it showed (or shows Pg 1)
+  LG.render();             // page numbers in the range bar follow reordering
 }
 
 function wire(dId,iId){
@@ -1898,6 +2095,7 @@ function resetSourceState() {
   sourceBytes = null; srcInfo = null; combinedDirty = false;
   _lastAutoGeom = '';   // a new project always re-derives rotation/alignment
   PagePreview.clearCache();
+  LG.reset();           // …and one set of Layer Settings
   syncDerivedPageState();
 }
 
@@ -2384,9 +2582,10 @@ async function doMerge() {
   bar.className = "progress-bar active"; fill.style.width = "10%";
 
   try {
-    const { layers } = resolve();
-    if (!layers) throw new Error("Invalid layer combination");
-    const onSet = new Set(layers);
+    /* Page ranges (LG): every range that has pages gets its own layer set. */
+    const plan = LG.plan();
+    for (const g of plan) if (!resolve(LG.resolveInput(g.gid)).layers)
+      throw new Error(LG.multi() ? `Range ${LG.letter(g.gid)}: invalid layer combination` : "Invalid layer combination");
 
     /* ── Load docs ─────────────────────────────────────────── */
     fill.style.width = "12%"; status.textContent = "Combining source pages…";
@@ -2419,6 +2618,18 @@ async function doMerge() {
     if (xoDict instanceof PDFRef) xoDict = ctx.lookup(xoDict);
     if (!xoDict) { xoDict = ctx.obj({}); resDict.set(PDFName.of('XObject'), xoDict); }
 
+    /* Each extra page range patches its own copy of the template streams,
+       cloned here before anything is patched; the first range uses the
+       originals, so a one-range merge is exactly what it always was. */
+    const cloneStreamRef = ref => {
+      const so = ref instanceof PDFRef ? ctx.lookup(ref) : ref;
+      return ctx.register(PDFLib.PDFRawStream.of(so.dict.clone(ctx), so.contents.slice()));
+    };
+    const streamsByG = new Map(plan.map((g, k) => [g.gid, k === 0 ? tplStreamRefs : tplStreamRefs.map(cloneStreamRef)]));
+
+    /* All template patching for ONE range, reading that range's settings off
+       the card (the loop below puts each range on the card in turn). */
+    const patchTemplate = async (tplStreamRefs) => {
     /* ── Patch Risk Category digit in template streams ─────── */
     const { riskCat } = resolve();
     const RISK_HEX = { 1:'0012', 2:'0013', 3:'0014', 4:'0015' };
@@ -2849,6 +3060,25 @@ async function doMerge() {
       console.log(`Override: ${ovPatchCount} values patched (height=${ovHeight||'—'}, P1=${ovP1||'—'}, P2=${ovP2||'—'})`);
     }
 
+      return { riskCat };
+    };
+
+    const rangeInfo = [];
+    const activeRange = LG.active;
+    if (LG.multi()) LG.groups[LG.idx(activeRange)].s = LG.capture();
+    try {
+      for (const g of plan) {
+        if (LG.multi()) LG.apply(LG.groups[LG.idx(g.gid)].s);
+        const r = resolve();
+        const { riskCat } = await patchTemplate(streamsByG.get(g.gid));
+        rangeInfo.push({ gid: g.gid, layers: r.layers, onSet: new Set(r.layers), riskCat });
+        if (LG.multi()) console.log(`Range ${LG.letter(g.gid)} (pages ${LG.fmtPages(g.pages.map(i => i + 1))}): ${r.layers.join(', ')}`);
+      }
+    } finally {
+      if (LG.multi()) LG.apply(LG.groups[LG.idx(activeRange)].s);
+    }
+    const layers = rangeInfo[0].layers, riskCat = rangeInfo[0].riskCat;
+
     /* ── Create "SRC" OCG for source content ──────────────── */
     const srcOcgDict = ctx.obj({});
     srcOcgDict.set(PDFName.of('Type'), PDFName.of('OCG'));
@@ -2860,6 +3090,41 @@ async function doMerge() {
     if (propsDict instanceof PDFRef) propsDict = ctx.lookup(propsDict);
     if (!propsDict) { propsDict = ctx.obj({}); resDict.set(PDFName.of('Properties'), propsDict); }
     propsDict.set(PDFName.of('SrcLayer'), srcOcgRef);
+
+    /* Extra ranges: rename their streams' layer tags (/MC12 → /MC12_R1) and
+       point the new tags at COPIES of the template layers, so each range's
+       layers switch on and off on their own. This runs after patching because
+       the patch steps find layer boundaries by the /MCn names. */
+    const streamText = so => {
+      const f = so.dict.get(PDFName.of('Filter')); let b;
+      try { b = f && f.toString() === '/FlateDecode' ? pako.inflate(so.contents) : so.contents; } catch (e) { return null; }
+      let t = ''; for (let k = 0; k < b.length; k += 8192) t += String.fromCharCode.apply(null, b.subarray(k, k + 8192));
+      return t;
+    };
+    const extraOcgs = [], onSetByOcg = new Map();
+    rangeInfo.forEach((ri, k) => {
+      if (k === 0) return;
+      const sfx = `_R${k}`, cloneOf = new Map();
+      for (const [kname, v] of [...propsDict.entries()]) {
+        const nm = kname.asString().slice(1);
+        if (!/^MC\d+$/.test(nm)) continue;
+        const key = v instanceof PDFRef ? v.toString() : nm;
+        let cref = cloneOf.get(key);
+        if (!cref) {
+          const d = v instanceof PDFRef ? ctx.lookup(v) : v;
+          if (!(d instanceof PDFDict)) continue;
+          cref = ctx.register(d.clone(ctx));
+          cloneOf.set(key, cref); extraOcgs.push(cref); onSetByOcg.set(cref.toString(), ri.onSet);
+        }
+        propsDict.set(PDFName.of(nm + sfx), cref);
+      }
+      for (const ref of streamsByG.get(ri.gid)) {
+        const so = ref instanceof PDFRef ? ctx.lookup(ref) : ref;
+        const text = streamText(so); if (text == null) continue;
+        const t2 = text.replace(/(\/OC\s+\/)(MC\d+)(\s+BDC)/g, `$1$2${sfx}$3`);
+        if (t2 !== text) writePatchedStream(so, so.dict, t2);
+      }
+    });
 
     /* ── Pre-load the ORIGINAL source files with pdf.js for any rasterized
        pages. Rendering from the originals (not the combined doc) keeps OCG
@@ -3004,7 +3269,7 @@ async function doMerge() {
 
       /* Set page Contents & Resources */
       const pageNode = outPages[i].node;
-      pageNode.set(PDFName.of('Contents'),  ctx.obj([ref, ...tplStreamRefs]));
+      pageNode.set(PDFName.of('Contents'),  ctx.obj([ref, ...(streamsByG.get(LG.gidOf(pageEntries[i])) || tplStreamRefs)]));
       pageNode.set(PDFName.of('Resources'), resEntry);  /* share page 0's resources ref */
       pageNode.delete(PDFName.of('Annots'));
     }
@@ -3025,6 +3290,7 @@ async function doMerge() {
       if (dConfig instanceof PDFDict && ocgs instanceof PDFArray) {
         /* Add SRC to the global OCGs list */
         ocgs.push(srcOcgRef);
+        extraOcgs.forEach(r => ocgs.push(r));   /* page-range layer copies */
 
         const onArr  = ctx.obj([]);
         const offArr = ctx.obj([]);
@@ -3045,7 +3311,7 @@ async function doMerge() {
           if (name === 'SRC') {
             onArr.push(ref);
           } else {
-            (onSet.has(name) ? onArr : offArr).push(ref);
+            ((onSetByOcg.get(ref.toString()) || rangeInfo[0].onSet).has(name) ? onArr : offArr).push(ref);
           }
         }
 
@@ -3143,7 +3409,7 @@ async function doMerge() {
     const srcNote = nSrc > 1 ? ` from ${nSrc} files` : '';
     const nFonts = fontReport.exact.length + fontReport.substituted.length;
     const fontNote = nFonts ? ` • ${nFonts} missing font${nFonts > 1 ? 's' : ''} embedded` : '';
-    status.textContent = `✓ ${nPages} page(s)${srcNote}, ${mb} MB${rasterNote} — layers: ${layers.join(', ')} • Risk Cat ${riskCat}${fontNote}`;
+    status.textContent = `✓ ${nPages} page(s)${srcNote}, ${mb} MB${rasterNote} — layers: ${rangeInfo.length > 1 ? rangeInfo.map(ri => `${LG.letter(ri.gid)}: ${ri.layers.filter(l => l !== '0').join(', ')}`).join(' | ') : `${layers.join(', ')} • Risk Cat ${riskCat}`}${fontNote}`;
     status.title = [...fontReport.exact.map(f => f + ' (exact)'), ...fontReport.substituted,
                     ...fontReport.skipped.map(f => 'not embedded — ' + f)].join('\n');
     dlArea.innerHTML = `<a class="download-link" href="${url}" download="${fname}">⬇ Download ${fname}</a>`;
@@ -8289,6 +8555,12 @@ function piApplyWind(force) {
     if (force) { PI_WIND.wsManual = false; if (s.exp) PI_WIND.expManual = false; }
     if (!PI_WIND.wsManual) piSetWindSpeed(s.ws);
     if (!PI_WIND.expManual && s.exp) document.getElementById("exposure").value = s.exp;
+    LG.groups.forEach(g => {   // same site → same wind for the other page ranges
+      if (g.id === LG.active || !g.s) return;
+      if (force) { g.s.wsManual = false; if (s.exp) g.s.expManual = false; }
+      if (!g.s.wsManual) g.s.ws = String(s.ws);
+      if (!g.s.expManual && s.exp) g.s.ex = s.exp;
+    });
     computeLayers();
   }
   piRenderWind();
@@ -8453,149 +8725,212 @@ async function extractProjectInfo() {
   }
 }
 
-/* ═══ Page-preview hover popup (cursor-anchored) ═════════════════
-   Renders a large preview of a source page while the pointer hovers a
-   Vector/Raster page button (see renderComplexityUI). The popup is
-   offset from the cursor and clamped to the viewport so the pointer
-   itself always stays visible and on-screen. */
+/* ═══ Page preview: fixed pane beside the page chips, zoom in place ═══
+   Hovering a page chip shows that page in the pane to the right of the chips
+   (it stays on the last page hovered, so nothing ever covers the chips or the
+   cursor). Clicking the pane zooms INSIDE the pane at that spot, to a
+   reading scale (~1.6 screen px per PDF point, so title-block text is
+   legible; at least 3×). While zoomed the wheel zooms 2×–14× about the
+   cursor, drag pans, click zooms back out. Hovering another chip resets it.
+   Speed: a page renders only when the pointer rests on its chip (~80 ms),
+   pane images are cached, an in-flight render is cancelled when the pointer
+   moves on, and the sharp zoomed image renders only after a click or once
+   the wheel stops (one per page is kept, reused when zooming out). Renders go to
+   a private offscreen canvas and are then blitted in. Never render into, or
+   read back from, a visible canvas: GPU readback mirrored pages, and
+   overlapping render() calls on one canvas throw. */
 const PagePreview = (function() {
-  const POPUP_W = 832, POPUP_H = 624;
-
-  // Lazily resolved on first use — elements must exist in DOM first
-  let popup, canvas, spinner, ctx;
-  function _init() {
-    if (popup) return;
-    const p = document.getElementById("piThumbPopup");
-    const c = document.getElementById("piThumbCanvas");
-    if (!p || !c) return;               // markup lives after the script tag
-    popup   = p;
-    canvas  = c;
-    spinner = document.getElementById("piThumbSpinner");
-    ctx     = canvas.getContext("2d");
-  }
-
-  /* _resolve(key) → a pdf.js page. Keyed by "fileIdx:srcPage" so the cache
-     survives page reordering (the key follows the page, not its position).
-     Cache values are OFFSCREEN canvases — see renderPage for why. */
   let _resolve = null;
-  let _cache  = {};
-  let _hideTimer = null;
-  let _curKey = null;   // key the popup is currently showing (stale-result guard)
-  let _task   = null;   // in-flight pdf.js RenderTask, so a new hover can cancel it
+  const _cache = { pane: {}, zoom: {} };   // pane: key → canvas; zoom: key → {lvl, cv}
+  const _task  = { pane: null, zoom: null };
+  let paneKey = null, paneIdx = -1, hoverTimer = null, wired = false;
+  const Z = { on: false, fit: null, drag: null, level: 3, ptW: 0, timer: null };
+  const ZMIN = 2, ZMAX = 14, READ_PX_PER_PT = 1.6;
+  const $ = id => document.getElementById(id);
 
-  // Place the popup on the roomier side of the cursor (offset by a gap),
-  // flipping to the other side if the preferred one won't fit, then clamp
-  // into the viewport. The box also shrinks to fit small viewports (the
-  // canvas scales via object-fit) so an oversized popup never runs off-
-  // screen — keeping both the preview and the pointer visible.
-  function positionPopup(cx, cy) {
-    const vw = window.innerWidth, vh = window.innerHeight, gap = 16, m = 8;
-    const w = Math.min(POPUP_W, vw - 2 * m);
-    const h = Math.min(POPUP_H, vh - 2 * m);
-    popup.style.width  = w + "px";
-    popup.style.height = h + "px";
-    let left;
-    if (vw - cx >= cx) { left = cx + gap; if (left + w > vw - m) left = cx - gap - w; }
-    else               { left = cx - gap - w; if (left < m)      left = cx + gap; }
-    left = Math.max(m, Math.min(left, vw - m - w));
-    let top;
-    if (vh - cy >= cy) { top = cy + gap; if (top + h > vh - m) top = cy - gap - h; }
-    else               { top = cy - gap - h; if (top < m)      top = cy + gap; }
-    top = Math.max(m, Math.min(top, vh - m - h));
-    popup.style.left = left + "px";
-    popup.style.top  = top  + "px";
+  /* Render `key` to fit w×h device pixels. The pane tier is cached per key;
+     the zoom tier is cached by renderZoom (one image per page). */
+  async function render(tier, key, w, h) {
+    if (tier === 'pane' && _cache.pane[key]) return _cache.pane[key];
+    if (_task[tier]) { try { _task[tier].cancel(); } catch (_) {} _task[tier] = null; }
+    const page = await _resolve(key);
+    const vp0 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(w / vp0.width, h / vp0.height) });
+    const off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(vp.width)); off.height = Math.max(1, Math.round(vp.height));
+    off.ptW = vp0.width;   // page width in PDF points (for the reading zoom)
+    const task = page.render({ canvasContext: off.getContext("2d"), viewport: vp });
+    _task[tier] = task;
+    try { await task.promise; } finally { if (_task[tier] === task) _task[tier] = null; }
+    if (tier === 'pane') _cache.pane[key] = off;
+    return off;
   }
-
-  // Blit a finished offscreen render onto the visible popup canvas.
-  function paint(src) {
-    canvas.width  = src.width;
-    canvas.height = src.height;
-    ctx.drawImage(src, 0, 0);
-    spinner.style.display = "none";
+  function blit(cv, src) {
+    cv.width = src.width; cv.height = src.height;
+    cv.getContext("2d").drawImage(src, 0, 0);
   }
+  const dpr = () => Math.min(window.devicePixelRatio || 1, 2);
+  const caption = () => {
+    const cap = $("cpPrevCap"); if (!cap || paneIdx < 0) return;
+    cap.textContent = Z.on ? `Pg ${paneIdx + 1} · ${Z.level.toFixed(Z.level < 10 ? 1 : 0)}× · wheel zooms · drag pans · click to zoom out` : `Pg ${paneIdx + 1} · click to zoom`;
+  };
 
-  /* Renders `key` into an OFFSCREEN canvas, then blits the result in.
-     Two reasons never to render into (or read pixels back off) the live
-     popup canvas:
-       · It is large and on-screen, so the browser composites it on the GPU.
-         Snapshotting it back — the old createImageBitmap(canvas) — is a GPU
-         readback, and a readback with a mismatched texture origin comes back
-         vertically mirrored. Once that snapshot landed in the cache the page
-         stayed mirrored until Clear files, which is why it looked like only
-         certain pages were affected.
-       · pdf.js throws "Cannot use the same canvas during multiple render()
-         operations" if two renders overlap on one canvas — what a quick sweep
-         across the page buttons used to do, surfacing as "Preview unavailable".
-     A private canvas is never composited, so neither applies; the in-flight
-     task is still cancelled on a new hover so we don't decode pages nobody
-     is looking at any more. */
-  async function renderPage(key) {
-    _init();
-    if (!canvas) return;
-    if (_cache[key]) { paint(_cache[key]); return; }
-
-    spinner.textContent = "Rendering…";
-    spinner.style.display = "flex";
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (_task) { try { _task.cancel(); } catch (_) {} _task = null; }
-
+  /* Show src fitted inside the view (CSS size), not zoomed. */
+  function fitInView(src) {
+    const view = $("cpPrevView"), cv = $("cpPrevCanvas");
+    const vw = view.clientWidth, vh = view.clientHeight, k = Math.min(vw / src.width, vh / src.height);
+    blit(cv, src);
+    Z.fit = { w: src.width * k, h: src.height * k };
+    Z.ptW = src.ptW || 0;
+    cv.style.width = Z.fit.w + "px"; cv.style.height = Z.fit.h + "px";
+  }
+  function unzoom() {
+    if (!Z.on) return;
+    Z.on = false; $("cpPrevView").classList.remove("zoomed"); $("cpPreview").classList.remove("zoomed");
+    clearTimeout(Z.timer);
+    if (_task.zoom) { try { _task.zoom.cancel(); } catch (_) {} _task.zoom = null; }
+    $("cpPrevSpin").style.display = "none";
+    if (paneKey && _cache.pane[paneKey]) fitInView(_cache.pane[paneKey]);
+    caption();
+  }
+  /* Set the zoom level, keeping the content point under (ax, ay) — client
+     coords — where it is; then schedule a sharp render. */
+  function setLevel(level, ax, ay, delay) {
+    const view = $("cpPrevView"), cv = $("cpPrevCanvas"), vr = view.getBoundingClientRect();
+    const ox = ax - vr.left, oy = ay - vr.top;
+    const oldW = parseFloat(cv.style.width) || Z.fit.w, oldH = parseFloat(cv.style.height) || Z.fit.h;
+    const px = (view.scrollLeft + ox) / oldW, py = (view.scrollTop + oy) / oldH;
+    Z.level = Math.min(ZMAX, Math.max(ZMIN, level));
+    const zw = Z.fit.w * Z.level, zh = Z.fit.h * Z.level;
+    cv.style.width = zw + "px"; cv.style.height = zh + "px";    // stretched stand-in at once
+    view.scrollLeft = px * zw - ox; view.scrollTop = py * zh - oy;
+    caption();
+    clearTimeout(Z.timer);
+    Z.timer = setTimeout(renderZoom, delay);
+  }
+  async function renderZoom() {
+    const key = paneKey; if (!Z.on || !key) return;
+    const cv = $("cpPrevCanvas"), lvl = Z.level, have = _cache.zoom[key];
+    if (have && have.lvl >= lvl - 0.01) { blit(cv, have.cv); return; }   // a finer image scales down fine
+    const sp = $("cpPrevSpin"); sp.textContent = "Rendering…"; sp.style.display = "flex";
     try {
-      const page = await _resolve(key);
-      if (_curKey !== key) return;          // pointer moved on while resolving
-      const vp0  = page.getViewport({ scale: 1 });
-      const scale = Math.min(POPUP_W / vp0.width, POPUP_H / vp0.height);
-      const vp   = page.getViewport({ scale });
+      const d = dpr(), zw = Z.fit.w * lvl * d, zh = Z.fit.h * lvl * d;
+      const k = Math.min(1, 9000 / Math.max(zw, zh));              // long side ≤ 9000 px
+      const src = await render("zoom", key, zw * k, zh * k);
+      _cache.zoom[key] = { lvl: lvl * k, cv: src };
+      if (paneKey !== key || !Z.on) return;
+      blit(cv, src); sp.style.display = "none";                    // CSS size keeps the zoom
+    } catch (e) {
+      if (!(e && e.name === "RenderingCancelledException")) { console.warn(e); sp.style.display = "none"; }
+    }
+  }
+  function zoomAt(cx, cy) {
+    if (!Z.fit || !paneKey) return;
+    const view = $("cpPrevView"), cv = $("cpPrevCanvas");
+    const r = cv.getBoundingClientRect();
+    const fx = Math.min(1, Math.max(0, (cx - r.left) / r.width)), fy = Math.min(1, Math.max(0, (cy - r.top) / r.height));
+    /* reading scale: READ_PX_PER_PT screen px per PDF point, at least 3× */
+    const lvl = Z.ptW ? Math.max(3, READ_PX_PER_PT * Z.ptW / Z.fit.w) : 3;
+    Z.on = true; view.classList.add("zoomed"); $("cpPreview").classList.add("zoomed");
+    Z.level = Math.min(ZMAX, Math.max(ZMIN, lvl));
+    const zw = Z.fit.w * Z.level, zh = Z.fit.h * Z.level;
+    cv.style.width = zw + "px"; cv.style.height = zh + "px";
+    view.scrollLeft = fx * zw - view.clientWidth / 2;               // clicked spot to the centre
+    view.scrollTop  = fy * zh - view.clientHeight / 2;
+    caption();
+    clearTimeout(Z.timer); renderZoom();
+  }
 
-      const off = document.createElement("canvas");
-      off.width  = Math.round(vp.width);
-      off.height = Math.round(vp.height);
+  function wire() {
+    if (wired) return;
+    const view = $("cpPrevView"); if (!view) return;
+    wired = true;
+    view.addEventListener("pointerdown", ev => {
+      if (paneIdx < 0) return;
+      Z.drag = { x: ev.clientX, y: ev.clientY, sl: view.scrollLeft, st: view.scrollTop, moved: false };
+      view.setPointerCapture(ev.pointerId);
+    });
+    view.addEventListener("pointermove", ev => {
+      const g = Z.drag; if (!g) return;
+      const dx = ev.clientX - g.x, dy = ev.clientY - g.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) g.moved = true;
+      if (g.moved && Z.on) { view.scrollLeft = g.sl - dx; view.scrollTop = g.st - dy; }
+    });
+    view.addEventListener("pointerup", ev => {
+      const g = Z.drag; Z.drag = null; if (!g || g.moved) return;
+      if (Z.on) unzoom(); else zoomAt(ev.clientX, ev.clientY);
+    });
+    view.addEventListener("pointercancel", () => { Z.drag = null; });
+    /* wheel zooms only while zoomed (otherwise the page scrolls as usual) */
+    view.addEventListener("wheel", ev => {
+      if (!Z.on) return;
+      ev.preventDefault();
+      const f = Math.pow(1.25, -Math.sign(ev.deltaY) * Math.min(3, Math.max(1, Math.abs(ev.deltaY) / 100)));
+      setLevel(Z.level * f, ev.clientX, ev.clientY, 220);
+    }, { passive: false });
+  }
 
-      const task = page.render({ canvasContext: off.getContext("2d"), viewport: vp });
-      _task = task;
-      await task.promise;
-      if (_task === task) _task = null;
-
-      _cache[key] = off;                    // keep it even if the hover moved on
-      if (_curKey === key) paint(off);
+  /* ── Pane ── */
+  async function showInPane(key, idx) {
+    const pane = $("cpPreview"), sp = $("cpPrevSpin");
+    if (!pane || !_resolve) return;
+    wire();
+    if (key !== paneKey) unzoom();
+    paneKey = key; paneIdx = idx;
+    document.querySelectorAll("#cpPages .cp-page").forEach((n, j) => n.classList.toggle("previewing", j === idx));
+    caption();
+    pane.classList.add("has");
+    if (Z.on) return;                                     // same page, already zoomed
+    if (!_cache.pane[key]) { sp.textContent = "Rendering…"; sp.style.display = "flex"; }
+    try {
+      const view = $("cpPrevView"), d = dpr();
+      const src = await render("pane", key, Math.max(240, view.clientWidth) * d, Math.max(150, view.clientHeight) * d);
+      if (paneKey !== key || Z.on) return;
+      fitInView(src); sp.style.display = "none";
     } catch (e) {
       if (e && e.name === "RenderingCancelledException") return;
-      if (_curKey !== key) return;          // don't report over a newer preview
-      spinner.textContent = "Preview unavailable";
+      if (paneKey === key) { sp.textContent = "Preview unavailable"; sp.style.display = "flex"; }
       console.warn("Page preview render failed:", e);
     }
   }
-
-  // Drop cached renders and abandon anything still in flight.
+  function clearPane() {
+    unzoom();
+    paneKey = null; paneIdx = -1;
+    const pane = $("cpPreview"); if (!pane) return;
+    pane.classList.remove("has");
+    const cv = $("cpPrevCanvas"); cv.width = cv.height = 0; cv.style.width = cv.style.height = "0px";
+    $("cpPrevSpin").style.display = "none";
+    $("cpPrevCap").textContent = "Hover a page to preview · click to zoom";
+  }
+  function keysNow() {
+    return (typeof pageEntries === "undefined" ? [] : pageEntries).map(e =>
+      entryParts(e).map(p => `${p.fileIdx}:${p.srcPage}`).join("+"));
+  }
   function reset() {
-    if (_task) { try { _task.cancel(); } catch (_) {} _task = null; }
-    _cache = {};
-    _curKey = null;
+    for (const t of Object.keys(_task)) if (_task[t]) { try { _task[t].cancel(); } catch (_) {} _task[t] = null; }
+    clearTimeout(hoverTimer);
+    clearPane();
+    _cache.pane = {}; _cache.zoom = {};
   }
 
   return {
-    // Hand over a "fileIdx:srcPage" → pdf.js page resolver (wired at boot,
-    // before the popup markup exists — so no _init() here).
     setResolver(fn) { _resolve = fn; reset(); },
     clearCache() { reset(); },
     hasDoc() { return !!_resolve; },
-    show(key, ev) {
-      _init();
-      if (!_resolve || !popup) return;
-      clearTimeout(_hideTimer);
-      positionPopup(ev.clientX, ev.clientY);
-      popup.style.display = "block";
-      _curKey = key;
-      renderPage(key);
+    /* chip hover: show after a short rest so a sweep doesn't queue renders */
+    hover(key, idx) {
+      clearTimeout(hoverTimer);
+      if (_cache.pane[key]) { showInPane(key, idx); return; }
+      hoverTimer = setTimeout(() => showInPane(key, idx), 80);
     },
-    move(ev) {
-      if (popup && popup.style.display === "block") positionPopup(ev.clientX, ev.clientY);
-    },
-    hide() {
-      _hideTimer = setTimeout(() => {
-        if (popup) popup.style.display = "none";
-        _curKey = null;   // a render still running will cache but not paint
-      }, 120);
+    leave() { clearTimeout(hoverTimer); },
+    hide() { clearTimeout(hoverTimer); },
+    /* after the chips are rebuilt: keep the pane on the same page, or the first */
+    refresh() {
+      const keys = keysNow();
+      if (!keys.length) { clearPane(); return; }
+      const j = paneKey ? keys.indexOf(paneKey) : -1;
+      if (j >= 0) showInPane(keys[j], j); else showInPane(keys[0], 0);
     }
   };
 })();
@@ -9318,10 +9653,5 @@ computeLayers();
   })();
 })();
 </script>
-<!-- Page preview popup (shared singleton, repositioned on each hover) -->
-<div id="piThumbPopup">
-  <canvas id="piThumbCanvas"></canvas>
-  <div class="pt-spinner" id="piThumbSpinner">Rendering…</div>
-</div>
 </body>
 </html>
