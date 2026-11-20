@@ -1860,6 +1860,67 @@ async function flattenPageAnnotations(bytes) {
    committed once at least one survives — a drop of nothing but junk
    leaves the project already loaded untouched.
 ──────────────────────────────────────────────────────────────────── */
+/* ── Secured (encrypted) source PDFs ───────────────────────────────
+   Stock pdf-lib only has ignoreEncryption, which skips the check but
+   leaves every stream encrypted. The @cantoo/pdf-lib fork can decrypt
+   (RC4 / AES-128 / AES-256), so it is loaded ON DEMAND, only when a
+   source looks encrypted. Its UMD build also claims window.PDFLib, so
+   the stock global is put back straight after it loads.
+   After decrypting, the leftovers of the old file structure are
+   dropped: the security dict, and the old XRef / object streams (the
+   fork keeps the XRef stream as a raw object whose /Encrypt makes
+   stock pdf-lib think the file is still encrypted). */
+const PDFLIB_CRYPT_URL = 'https://cdn.jsdelivr.net/npm/@cantoo/pdf-lib@2.11.1/dist/pdf-lib.min.js';
+let _pdfLibCrypt = null;
+async function loadPdfLibCrypt() {
+  if (_pdfLibCrypt) return _pdfLibCrypt;
+  const stock = window.PDFLib;
+  try {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = PDFLIB_CRYPT_URL; s.onload = res;
+      s.onerror = () => rej(new Error('could not load the PDF unlock library — check the connection'));
+      document.head.appendChild(s);
+    });
+    if (window.PDFLib && window.PDFLib !== stock) _pdfLibCrypt = window.PDFLib;
+  } finally { window.PDFLib = stock; }
+  if (!_pdfLibCrypt) throw new Error('PDF unlock library did not load');
+  return _pdfLibCrypt;
+}
+
+function bytesInclude(bytes, ascii) {
+  const p = [...ascii].map(c => c.charCodeAt(0)), n = bytes.length - p.length;
+  outer: for (let i = bytes.indexOf(p[0]); i >= 0 && i <= n; i = bytes.indexOf(p[0], i + 1)) {
+    for (let k = 1; k < p.length; k++) if (bytes[i + k] !== p[k]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+async function decryptIfSecured(bytes, onStart) {
+  if (!bytesInclude(bytes, '/Encrypt')) return bytes;          /* the usual case: not encrypted */
+  if (onStart) onStart();
+  const C = await loadPdfLibCrypt();
+  let d;
+  try { d = await C.PDFDocument.load(bytes, { password: '', updateMetadata: false }); }
+  catch (e) { throw new Error(/password/i.test(String(e && e.message)) ? 'password-protected — open and re-save it without a password' : 'could not unlock this secured PDF'); }
+  if (!d.context.isDecrypted) return bytes;                     /* "/Encrypt" was just text somewhere */
+  const ctx = d.context, N = n => C.PDFName.of(n);
+  for (const [ref, o] of ctx.enumerateIndirectObjects()) {
+    if (o instanceof C.PDFInvalidObject) {
+      let t = ''; const b = o.data || [];
+      for (let k = 0; k < Math.min(b.length, 400); k++) t += String.fromCharCode(b[k]);
+      if (/\/Type\s*\/(XRef|ObjStm)\b/.test(t)) ctx.delete(ref);
+      continue;
+    }
+    const dict = o instanceof C.PDFDict ? o : o && o.dict;
+    if (!(dict instanceof C.PDFDict)) continue;
+    const type = String(dict.get(N('Type')) || ''), filt = String(dict.get(N('Filter')) || '');
+    if (type === '/XRef' || type === '/ObjStm' || (filt === '/Standard' && dict.get(N('O')))) ctx.delete(ref);
+  }
+  return new Uint8Array(await d.save({ useObjectStreams: false }));
+}
+
 async function ldSources(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
@@ -1891,14 +1952,28 @@ async function ldSources(fileList) {
       skipped.push(`${f.name} (unsupported file type)`);
       continue;
     } else {
+      /* Secured PDFs (no password to open, but editing restricted) keep
+         their streams encrypted; pdf-lib can't read them, so the merge
+         died with "Unknown compression method in flate stream". Decrypt
+         them up front so everything downstream sees a plain PDF. */
+      try {
+        const plain = await decryptIfSecured(bytes, () => { sub.textContent = `${pfx}Unlocking ${f.name}…`; });
+        if (plain !== bytes) console.log(`Decrypted secured PDF: ${f.name}`);
+        bytes = plain;
+      } catch(e) {
+        console.error('Decrypt:', e);
+        skipped.push(`${f.name} (${e.message})`);
+        continue;
+      }
       /* For PDF sources, bake annotation appearances into each
          page's content stream so pdf-lib's embedPage() renders
          FreeText / Stamp / Ink / Square markups during merge. */
+      const beforeAnnots = bytes;
       try {
         bytes = await flattenPageAnnotations(bytes);
       } catch(e) {
         console.warn('Annot flatten:', e);
-        bytes = new Uint8Array(await f.arrayBuffer()); // non-fatal — use the original
+        bytes = beforeAnnots; // non-fatal — use the (decrypted) original
       }
     }
 
