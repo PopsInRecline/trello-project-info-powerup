@@ -39,7 +39,9 @@ writeFileSync(join(out, "tpl_data.js"), readFileSync(join(src, "tpl_data.js")));
 const fontSrc = join(src, "font_data.js");
 if (existsSync(fontSrc)) {
   const FONT_DATA = new Function(readFileSync(fontSrc, "utf8") + "\nreturn FONT_DATA;")();
-  const keys = Object.keys(FONT_DATA.fallback || {}).sort();
+  // "calibri" is Microsoft's font (desktop tool only): never publish it.
+  // Trello output draws the date box with the Liberation Sans substitute.
+  const keys = Object.keys(FONT_DATA.fallback || {}).filter(k => k !== "calibri").sort();
   if (!keys.length) throw new Error("font_data.js has no fallback fonts");
   const lines = keys.map(k => `  ${JSON.stringify(k)}: ${JSON.stringify(FONT_DATA.fallback[k])}`);
   writeFileSync(join(out, "font_data.js"),

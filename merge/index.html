@@ -2320,6 +2320,93 @@ function checkTplData() {
    fonts (a Latin substitute would draw the wrong glyphs), Type3, and CID
    fonts that aren't Identity-encoded or lack a ToUnicode map.
    Returns { exact:[names], substituted:[names → key], skipped:[names: why] }. */
+/* ═══ Engineer's date box ═══════════════════════════════════════════════
+   Every output page gets an Acrobat "Text Box" comment (FreeText annotation)
+   with today's date — "NOV / 20 / 2026" on three lines, Calibri 6 pt,
+   centered — just above the template's ENGINEER'S SIGNATURE label, where the
+   office used to place it by hand. Positions were measured on the 2023 and
+   2026 Sign Borders templates (identical there): the box is centered on the
+   SIGNATURE word and sits 2 pt above the top of ENGINEER'S.
+   The appearance font /Calibri carries the Calibri subset from font_data.js,
+   or Liberation Sans where that subset isn't shipped (the Trello copy).
+   Acrobat redraws the box in Calibri whenever it is edited (DA/DS/RC). */
+const DATE_BOX = {
+  W: 19.47, H: 20.41, LEAD: 7.2, SIZE: 6,
+  /* template width > 800 pt → 11x17; else 8.5x11.  cx = box center, y0 = box bottom */
+  spot(tplW) { return tplW > 800 ? { cx: 1211.76, y0: 689.166 } : { cx: 780.12, y0: 509.416 }; },
+  /* Calibri advance widths (1/1000 em), codes 32–126 */
+  CW: [226,326,401,498,507,715,682,221,303,303,498,498,250,306,252,386,507,507,507,507,507,507,507,507,507,507,
+       268,268,498,498,498,463,894,579,544,533,615,488,459,631,623,252,319,520,420,855,646,662,517,673,543,459,
+       487,642,567,890,519,487,468,307,386,307,498,498,291,479,525,423,525,498,305,471,525,229,239,455,229,799,
+       525,527,525,525,349,391,335,525,452,715,433,453,395,314,460,314,498],
+  width(t) { let w = 0; for (const ch of t) { const c = ch.charCodeAt(0); w += (c >= 32 && c <= 126) ? this.CW[c - 32] : 500; } return w * this.SIZE / 1000; },
+  lines(d) { return [d.toLocaleString('en-US', { month: 'short' }).toUpperCase(), String(d.getDate()), String(d.getFullYear())]; },
+  pdfDate(d) {
+    const p = n => String(Math.abs(n)).padStart(2, '0'), o = -d.getTimezoneOffset();
+    return `D:${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}` +
+           `${o >= 0 ? '+' : '-'}${p(Math.trunc(o / 60))}'${p(o % 60)}'`;
+  },
+  uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  },
+  /* add one box to every page (pages are template-sized, unrotated) */
+  addAll(doc, pages, tplW) {
+    const { PDFName, PDFString, PDFNumber } = PDFLib;
+    const ctx = doc.context, now = new Date();
+    const { cx, y0 } = this.spot(tplW);
+    const x0 = +(cx - this.W / 2).toFixed(3), x1 = +(x0 + this.W).toFixed(3), y1 = +(y0 + this.H).toFixed(3);
+    const L = this.lines(now), f = n => n.toFixed(3);
+
+    const descD = ctx.obj({
+      Type: 'FontDescriptor', FontName: 'Calibri', FontFamily: PDFString.of('Calibri'), Flags: 32,
+      FontBBox: [-503, -312, 1240, 1026], ItalicAngle: 0, Ascent: 750, Descent: -250, CapHeight: 632,
+      XHeight: 467, StemV: 80, FontWeight: 400
+    });
+    /* embed it here, so the status bar's "missing fonts embedded" stays about the sources */
+    const prog = typeof FONT_DATA !== 'undefined' && FONT_DATA.fallback && (FONT_DATA.fallback.calibri || FONT_DATA.fallback.sans);
+    if (prog) {
+      const z = b64ToBytes(prog[1]);
+      descD.set(PDFName.of('FontFile2'), ctx.register(ctx.stream(z, { Filter: 'FlateDecode', Length: z.length, Length1: prog[0] })));
+    }
+    const desc = ctx.register(descD);
+    const font = ctx.register(ctx.obj({
+      Type: 'Font', Subtype: 'TrueType', BaseFont: 'Calibri', Encoding: 'WinAnsiEncoding',
+      FirstChar: 32, LastChar: 126, Widths: this.CW, FontDescriptor: desc
+    }));
+    let txt = '';
+    L.forEach((t, k) => {
+      const tx = cx - this.width(t) / 2, ty = y1 - 4.5 - k * this.LEAD;
+      txt += `1 0 0 1 ${f(tx)} ${f(ty)} Tm (${t}) Tj\n`;
+    });
+    const apBytes = new TextEncoder().encode(
+      `q\n${f(x0)} ${f(y0)} ${f(this.W)} ${f(this.H)} re W n\nBT\n/Calibri ${this.SIZE} Tf\n0 g\n${txt}ET\nQ\n`);
+    const ap = ctx.register(ctx.stream(apBytes, {
+      Type: 'XObject', Subtype: 'Form', FormType: 1, BBox: [x0, y0, x1, y1],
+      Matrix: [1, 0, 0, 1, -x0, -y0], Resources: { Font: { Calibri: font }, ProcSet: ['PDF', 'Text'] }
+    }));
+
+    const stamp = this.pdfDate(now);
+    const rc = '<?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/" ' +
+      'xfa:APIVersion="Acrobat:26.3.0" xfa:spec="2.0.2"  style="font-size:6.0pt;text-align:center;color:#000000;font-weight:normal;' +
+      'font-style:normal;font-family:Calibri;font-stretch:normal"><p dir="ltr">' + L.join('&#13;') + '</p></body>';
+    const bs = ctx.obj({ W: 0 });
+    for (const pg of pages) {
+      const annot = ctx.obj({
+        Type: 'Annot', Subtype: 'FreeText', Rect: [x0, y0, x1, y1], F: 4,
+        Contents: PDFString.of(L.join('\r')), DA: PDFString.of(`0 g /Calibri ${this.SIZE} Tf`),
+        DS: PDFString.of('font: Calibri 6.0pt; text-align:center; color:#000000 '), RC: PDFString.of(rc), Q: 1,
+        BS: bs, T: PDFString.of('CLangley'), Subj: PDFString.of('Text Box'), NM: PDFString.of(this.uuid()),
+        CreationDate: PDFString.of(stamp), M: PDFString.of(stamp), P: pg.ref, AP: { N: ap }
+      });
+      pg.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+    }
+    console.log(`Date box: ${L.join(' ')} on ${pages.length} page(s) at [${x0}, ${y0}, ${x1}, ${y1}]`);
+  }
+};
+
 function embedMissingFonts(doc) {
   const report = { exact: [], substituted: [], skipped: [] };
   if (typeof FONT_DATA === 'undefined' || !FONT_DATA.fallback) {
@@ -2369,6 +2456,12 @@ function embedMissingFonts(doc) {
     const narrow = /narrow|cond|compress|arialn/.test(n);
     const bold   = /bold|black|heavy|semibold|demi|extrabold|ultra|,b$/.test(n) || numOf(desc.get(N('FontWeight'))) >= 600 || (flags & 0x40000);
     const ital   = /italic|oblique|slant|kursiv/.test(n) || numOf(desc.get(N('ItalicAngle'))) !== 0 || (flags & 64);
+    /* real Calibri (subset) where font_data.js ships it — the desktop tool, not the Trello copy */
+    if (/calibri/.test(n) && !/light/.test(n) && FONT_DATA.fallback.calibri) {
+      const b = /bold|,b$/.test(n) || numOf(desc.get(N('FontWeight'))) >= 600;
+      const i = /italic|oblique|,i$/.test(n) || numOf(desc.get(N('ItalicAngle'))) !== 0;
+      if (!b && !i) return 'calibri';
+    }
     const fam = monoName ? 'mono' : sansName ? (narrow ? 'narrow' : 'sans') : serifName ? 'serif'
               : (flags & 1) ? 'mono' : (flags & 2) ? 'serif' : narrow ? 'narrow' : 'sans';
     return fam + (bold || ital ? '-' + (bold ? 'b' : '') + (ital ? 'i' : '') : '');
@@ -3774,6 +3867,10 @@ async function doMerge() {
       pageNode.set(PDFName.of('Resources'), resEntry);  /* share page 0's resources ref */
       pageNode.delete(PDFName.of('Annots'));
     }
+
+    /* Engineer's date box (Acrobat Text Box comment) on every page */
+    try { DATE_BOX.addAll(outDoc, outPages, tplW); }
+    catch (e) { console.warn('Date box skipped:', e); }
 
     /* ── Set OCG layer visibility ──────────────────────────── */
     fill.style.width = "80%"; status.textContent = "Configuring layers…";
