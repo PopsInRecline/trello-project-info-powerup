@@ -307,8 +307,8 @@
         <div class="tpl-error" id="tplError"></div>
       </div>
       <div class="file-drop" id="dropSource" onclick="document.getElementById('fileSource').click()">
-        <input type="file" id="fileSource" accept=".pdf,.jpg,.jpeg,.png" multiple><div class="icon">📄</div>
-        <div class="label">SOURCE FILE(S)</div><div class="sublabel">PDF, JPG, or PNG — drop several together to combine</div>
+        <input type="file" id="fileSource" accept=".pdf,.jpg,.jpeg,.png,.zip" multiple><div class="icon">📄</div>
+        <div class="label">SOURCE FILE(S)</div><div class="sublabel">PDF, JPG, PNG, or ZIP — drop several together to combine</div>
         <div class="file-name" id="nameSource"></div></div>
     </div>
     <div id="complexityPanel" class="complexity-panel">
@@ -1601,7 +1601,72 @@ function detectFileType(bytes) {
   if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return 'jpg';
   if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'png';
   if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return 'pdf';
+  if (bytes[0] === 0x50 && bytes[1] === 0x4B && bytes[2] === 0x03 && bytes[3] === 0x04) return 'zip';
   return null;
+}
+
+/* ── ZIP sources ──────────────────────────────────────────────────
+   A ZIP is unpacked on load: its PDFs / JPGs / PNGs become ordinary
+   source files (shown by their own names in SOURCE, combined like a
+   multi-file drop) and the ZIP itself never appears. Entries go in
+   natural filename order (Sheet 2 before Sheet 10); folders, Mac
+   "__MACOSX" / "._" junk and other file types are left out, and a ZIP
+   inside the ZIP is unpacked too. fflate (~30 KB) is loaded on demand,
+   only when a ZIP is dropped. */
+const FFLATE_URL = 'https://cdn.jsdelivr.net/npm/fflate@0.8.3/umd/index.js';
+let _fflate = null;
+async function loadFflate() {
+  if (_fflate) return _fflate;
+  const amd = window.define; window.define = undefined;   /* else the UMD build registers with AMD, not window */
+  try {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = FFLATE_URL; s.onload = res;
+      s.onerror = () => rej(new Error('could not load the unzip library — check the connection'));
+      document.head.appendChild(s);
+    });
+  } finally { window.define = amd; }
+  if (!window.fflate) throw new Error('unzip library did not load');
+  return (_fflate = window.fflate);
+}
+
+const naturalCmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
+/* files → files, with every ZIP replaced by its usable entries (in place,
+   so the drop order is kept). skipped collects what was left out. */
+async function expandZips(files, skipped, onStatus, depth = 0) {
+  const out = [];
+  for (const f of files) {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    if (detectFileType(bytes) !== 'zip') { out.push(f); continue; }
+    if (onStatus) onStatus(`Unzipping ${f.name}…`);
+    let entries;
+    try { entries = (await loadFflate()).unzipSync(bytes); }
+    catch (e) {
+      console.error('Unzip:', e);
+      skipped.push(`${f.name} (${/encrypt|password/i.test(e.message) ? 'password-protected ZIP' : e.message.startsWith('could not') || e.message.startsWith('unzip') ? e.message : 'unreadable ZIP'})`);
+      continue;
+    }
+    const paths = Object.keys(entries)
+      .filter(p => !p.endsWith('/') && !/(^|\/)__MACOSX\//.test(p) && !/(^|\/)\._/.test(p) && !/(^|\/)(\.DS_Store|Thumbs\.db)$/i.test(p))
+      .sort(naturalCmp);
+    const base = p => p.split('/').pop();
+    const dupes = new Set(paths.map(base).filter((n, i, a) => a.indexOf(n) !== i));
+    const inner = [], other = [];
+    for (const p of paths) {
+      const b = entries[p], type = detectFileType(b);
+      if (!type) { other.push(base(p)); continue; }
+      if (type === 'zip' && depth >= 2) { other.push(base(p)); continue; }
+      /* same file name in two folders → keep the folder so they stay apart */
+      inner.push(new File([b], dupes.has(base(p)) ? p.replace(/\//g, ' › ') : base(p)));
+    }
+    if (other.length) console.warn(`${f.name}: left out ${other.length} other file(s):`, other);
+    const usable = await expandZips(inner, skipped, onStatus, depth + 1);
+    if (!usable.length) { skipped.push(`${f.name} (no PDF, JPG or PNG inside)`); continue; }
+    console.log(`${f.name}: ${usable.length} file(s) — ${usable.map(u => u.name).join(', ')}`);
+    out.push(...usable);
+  }
+  return out;
 }
 
 /* Convert a JPG or PNG image to a single-page PDF.
@@ -1922,12 +1987,16 @@ async function decryptIfSecured(bytes, onStart) {
 }
 
 async function ldSources(fileList) {
-  const files = Array.from(fileList || []);
-  if (!files.length) return;
-
   const el  = document.getElementById('dropSource');
   const sub = el.querySelector('.sublabel');
   const prepared = [], skipped = [];
+
+  /* ZIPs are swapped for the files inside them before anything else */
+  const files = await expandZips(Array.from(fileList || []), skipped, msg => { sub.textContent = msg; });
+  if (!files.length) {
+    if (skipped.length) { sub.textContent = skipped.length === 1 ? `Skipped — ${skipped[0]}` : `Skipped ${skipped.length} files`; updateBtn(); }
+    return;
+  }
 
   for (let n = 0; n < files.length; n++) {
     const f = files[n];
@@ -2014,7 +2083,7 @@ async function ldSources(fileList) {
   refreshSourceLabel();
   sub.textContent = skipped.length
     ? `${skipped.length} file(s) skipped — see console`
-    : 'PDF, JPG, or PNG — drop several together to combine';
+    : 'PDF, JPG, PNG, or ZIP — drop several together to combine';
   renderComplexityUI();
   updateBtn();
   updatePlacementPreview();
@@ -2179,7 +2248,7 @@ function clearSources() {
   document.getElementById('complexityPanel').classList.remove('visible');
   const el = document.getElementById('dropSource');
   el.classList.remove('loaded');
-  el.querySelector('.sublabel').textContent = 'PDF, JPG, or PNG — drop several together to combine';
+  el.querySelector('.sublabel').textContent = 'PDF, JPG, PNG, or ZIP — drop several together to combine';
   document.getElementById('nameSource').textContent = '';
   piSourceFileName = '';
   document.getElementById('projectInfoCard').classList.remove('visible');
@@ -9915,7 +9984,7 @@ computeLayers();
      card button (hosted copy at <powerup>/merge/?trello=1, inside Trello's
      iframe). Everywhere else — the local file, the hosted page opened in a
      normal tab — this block does nothing and the tool behaves as always.
-     What it changes: loads the card's PDF/JPG/PNG attachments as sources
+     What it changes: loads the card's PDF/JPG/PNG/ZIP attachments as sources
      (through the attachment proxy), hides the page header, saves the merged
      PDF to Downloads automatically when the merge finishes, and closes the
      Trello window on Esc. Training capture stays available (cloud key is
@@ -9988,6 +10057,7 @@ computeLayers();
     const n = byName(a) + " " + (a.url || ""), m = a.mimeType || "";
     if (m === "application/pdf" || /\.pdf(\s|$|\?)/i.test(n)) return "pdf";
     if (/^image\/(jpeg|png)$/.test(m) || /\.(jpe?g|png)(\s|$|\?)/i.test(n)) return "img";
+    if (/^application\/(x-)?zip(-compressed)?$/.test(m) || /\.zip(\s|$|\?)/i.test(n)) return "zip";
     return null;
   };
 
@@ -10031,7 +10101,8 @@ computeLayers();
 
   function renderList(atts) {
     const list = $("trList"); list.innerHTML = "";
-    const newestPdf = atts.find(a => kindOf(a) === "pdf");
+    /* tick the newest PDF; a card with only ZIPs gets its newest ZIP ticked */
+    const newestPdf = atts.find(a => kindOf(a) === "pdf") || atts.find(a => kindOf(a) === "zip");
     for (const a of atts) {
       const row = document.createElement("label");
       row.className = "tr-row";
@@ -10059,7 +10130,7 @@ computeLayers();
     const card = await res.json();
     $("trTitle").textContent = "Sources from: " + (card.name || "this card");
     const atts = (card.attachments || []).filter(kindOf).sort((a, b) => new Date(b.date) - new Date(a.date));
-    if (!atts.length) { setStatus("No PDF, JPG, or PNG attachments on this card. Drop files below instead."); return; }
+    if (!atts.length) { setStatus("No PDF, JPG, PNG, or ZIP attachments on this card. Drop files below instead."); return; }
     renderList(atts);
     if (atts.some(a => a._cb.checked)) await loadSelected(atts); // auto-load the newest PDF
     else setStatus("Tick the files to use, then Load selected.");
