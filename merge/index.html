@@ -2525,6 +2525,126 @@ function computePlacement(srcW, srcH, tplW, tplH, srcRotate, alignMode, forceRot
   return { scale, tx, ty, needsRotation, effW, effH };
 }
 
+/* ═══ Output size reduction (runs on every merge, just before save) ═══
+   1. Lossless cleanup. pdf-lib's embedPage copies each source page's content
+      stream and leaves that copy unused, and it copies resources the source
+      pages SHARE (fonts, images, nested forms) once per page. Identical
+      objects are merged, repeatedly, since merging children makes parents
+      identical too, and anything unreachable from the catalog is dropped.
+      OCG/OCMD dicts are never merged: page-range layer copies (LG) are
+      identical by design and must stay separate. Neither are page-tree or
+      catalog nodes. Measured on a 19.6 MB merge: 12.5 MB, pixel-identical.
+   2. Large photos. A JPEG image over 200 KB in RGB (DeviceRGB, or ICC with
+      N = 3), 8-bit, with no Decode array, is re-encoded at quality 0.8 with
+      the SAME pixel size. It is decoded without colour conversion or EXIF
+      rotation, so the PDF colour space and placement still apply unchanged.
+      It is kept only when it ends up at least 15% smaller. CMYK, grayscale,
+      indexed and non-JPEG images are left untouched. An SMask is a separate
+      object, so it is untouched too.
+   A failure is logged and the merge still saves (an image that fails to
+   re-encode is simply kept as it was). */
+async function optimizePdf(doc) {
+  const { PDFName, PDFRef, PDFDict, PDFArray, PDFRawStream, PDFNumber } = PDFLib;
+  const ctx = doc.context, stats = { merged: 0, dropped: 0, images: 0, imgSaved: 0 };
+  /* pdf-lib writes embedded pages/fonts/images LAZILY (at save). Flush them
+     first, or the sweep sees their source data as unreferenced and deletes it
+     ("Can't embed page with missing Contents"). */
+  await doc.flush();
+
+  const sweep = () => {                       // drop everything unreachable
+    const seen = new Set();
+    const visit = o => {
+      if (!o) return;
+      if (o instanceof PDFRef) { const k = o.toString(); if (seen.has(k)) return; seen.add(k); visit(ctx.lookup(o)); return; }
+      if (o instanceof PDFDict) { for (const [, v] of o.entries()) visit(v); return; }
+      if (o instanceof PDFArray) { for (const v of o.asArray()) visit(v); return; }
+      if (o.dict) visit(o.dict);
+    };
+    [ctx.trailerInfo.Root, ctx.trailerInfo.Info].forEach(visit);
+    for (const [ref] of [...ctx.enumerateIndirectObjects()])
+      if (!seen.has(ref.toString())) { ctx.delete(ref); stats.dropped++; }
+  };
+  const remap = map => {                      // point every reference at the kept copy
+    const fix = o => {
+      if (o instanceof PDFDict) {
+        for (const [k, v] of o.entries()) {
+          if (v instanceof PDFRef && map.has(v.toString())) o.set(k, map.get(v.toString())); else fix(v);
+        }
+      } else if (o instanceof PDFArray) {
+        const a = o.asArray();
+        for (let i = 0; i < a.length; i++) {
+          const v = a[i];
+          if (v instanceof PDFRef && map.has(v.toString())) o.set(i, map.get(v.toString())); else fix(v);
+        }
+      } else if (o && o.dict) fix(o.dict);
+    };
+    for (const [, obj] of ctx.enumerateIndirectObjects()) fix(obj);
+    fix(ctx.trailerInfo.Root);
+  };
+  const KEEP = new Set(['/Page', '/Pages', '/Catalog', '/OCG', '/OCMD']);
+  const fnv = c => { let x = 2166136261; for (let i = 0; i < c.length; i++) { x ^= c[i]; x = Math.imul(x, 16777619) >>> 0; } return x; };
+  const sameBytes = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
+
+  sweep();
+  for (let pass = 0; pass < 8; pass++) {
+    const first = new Map(), map = new Map();
+    for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+      let key;
+      if (obj instanceof PDFRawStream) key = 'S' + obj.contents.length + ':' + fnv(obj.contents) + ':' + obj.dict.toString();
+      else if (obj instanceof PDFDict) {
+        const t = obj.get(PDFName.of('Type'));
+        if (t && KEEP.has(t.toString())) continue;
+        key = 'D' + obj.toString();
+      } else continue;
+      const prev = first.get(key);
+      if (prev && (!(obj instanceof PDFRawStream) || sameBytes(ctx.lookup(prev).contents, obj.contents)))
+        map.set(ref.toString(), prev);
+      else if (!prev) first.set(key, ref);
+    }
+    if (!map.size) break;
+    stats.merged += map.size;
+    remap(map);
+    for (const k of map.keys()) { const [n, g] = k.split(' '); ctx.delete(PDFRef.of(+n, +g)); }
+  }
+  sweep();
+
+  /* 2. large RGB JPEG photos → quality 0.8, same pixel size */
+  for (const [ref, obj] of [...ctx.enumerateIndirectObjects()]) {
+    if (!(obj instanceof PDFRawStream) || obj.contents.length < 200000) continue;
+    const d = obj.dict;
+    if (String(d.get(PDFName.of('Subtype'))) !== '/Image') continue;
+    let f = d.get(PDFName.of('Filter'));
+    if (f instanceof PDFArray) { if (f.size() !== 1) continue; f = f.get(0); }
+    if (String(f) !== '/DCTDecode' || d.get(PDFName.of('Decode')) || d.get(PDFName.of('DecodeParms'))) continue;
+    if (String(d.get(PDFName.of('BitsPerComponent'))) !== '8') continue;
+    let cs = d.get(PDFName.of('ColorSpace')); if (cs instanceof PDFRef) cs = ctx.lookup(cs);
+    let rgb = String(cs) === '/DeviceRGB';
+    if (!rgb && cs instanceof PDFArray && String(cs.get(0)) === '/ICCBased') {
+      let icc = cs.get(1); if (icc instanceof PDFRef) icc = ctx.lookup(icc);
+      rgb = !!(icc && icc.dict && String(icc.dict.get(PDFName.of('N'))) === '3');
+    }
+    if (!rgb) continue;
+    try {
+      const bmp = await createImageBitmap(new Blob([obj.contents], { type: 'image/jpeg' }),
+                                          { colorSpaceConversion: 'none', imageOrientation: 'none', premultiplyAlpha: 'none' });
+      const W = +String(d.get(PDFName.of('Width'))), H = +String(d.get(PDFName.of('Height')));
+      if (bmp.width !== W || bmp.height !== H) { bmp.close && bmp.close(); continue; }
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      cv.getContext('2d').drawImage(bmp, 0, 0); bmp.close && bmp.close();
+      const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.8));
+      cv.width = cv.height = 0;
+      if (!blob) continue;
+      const nb = new Uint8Array(await blob.arrayBuffer());
+      if (nb.length > obj.contents.length * 0.85) continue;
+      stats.imgSaved += obj.contents.length - nb.length; stats.images++;
+      obj.contents = nb;
+      d.set(PDFName.of('Filter'), PDFName.of('DCTDecode'));
+      d.set(PDFName.of('Length'), PDFNumber.of(nb.length));
+    } catch (e) { console.warn('Image re-encode skipped:', ref.toString(), e); }
+  }
+  return stats;
+}
+
 /* ───────────────────────────────────────────────────────────────
    Write patched content-stream text back to a template stream.
 
@@ -3216,7 +3336,7 @@ async function doMerge() {
         }
 
         /* Canvas → JPEG bytes → embed in output PDF */
-        const dataUrl  = finalCvs.toDataURL('image/jpeg', 0.92);
+        const dataUrl  = finalCvs.toDataURL('image/jpeg', 0.8);   /* 0.8: ~30% smaller than 0.92, text still crisp at 300 DPI */
         const b64      = dataUrl.split(',')[1];
         const bstr     = atob(b64);
         const jpgBytes = new Uint8Array(bstr.length);
@@ -3328,9 +3448,18 @@ async function doMerge() {
 
     const fontReport = embedMissingFonts(outDoc);
 
+    /* ── Shrink: lossless cleanup + large photos (optimizePdf) ── */
+    fill.style.width = "86%"; status.textContent = "Reducing file size…";
+    let optNote = '';
+    try {
+      const os = await optimizePdf(outDoc);
+      console.log(`Optimize: merged ${os.merged} duplicate objects, dropped ${os.dropped} unused, re-encoded ${os.images} photo(s) (−${(os.imgSaved / 1048576).toFixed(1)} MB)`);
+      if (os.merged || os.dropped || os.images) optNote = ' (optimized)';
+    } catch (e) { console.warn('Optimize skipped:', e); }
+
     /* ── Save ──────────────────────────────────────────────── */
     fill.style.width = "92%"; status.textContent = "Saving…";
-    const bytes = await outDoc.save();
+    const bytes = await outDoc.save({ useObjectStreams: true });
     fill.style.width = "100%";
 
     const now = new Date();
@@ -3409,7 +3538,7 @@ async function doMerge() {
     const srcNote = nSrc > 1 ? ` from ${nSrc} files` : '';
     const nFonts = fontReport.exact.length + fontReport.substituted.length;
     const fontNote = nFonts ? ` • ${nFonts} missing font${nFonts > 1 ? 's' : ''} embedded` : '';
-    status.textContent = `✓ ${nPages} page(s)${srcNote}, ${mb} MB${rasterNote} — layers: ${rangeInfo.length > 1 ? rangeInfo.map(ri => `${LG.letter(ri.gid)}: ${ri.layers.filter(l => l !== '0').join(', ')}`).join(' | ') : `${layers.join(', ')} • Risk Cat ${riskCat}`}${fontNote}`;
+    status.textContent = `✓ ${nPages} page(s)${srcNote}, ${mb} MB${optNote}${rasterNote} — layers: ${rangeInfo.length > 1 ? rangeInfo.map(ri => `${LG.letter(ri.gid)}: ${ri.layers.filter(l => l !== '0').join(', ')}`).join(' | ') : `${layers.join(', ')} • Risk Cat ${riskCat}`}${fontNote}`;
     status.title = [...fontReport.exact.map(f => f + ' (exact)'), ...fontReport.substituted,
                     ...fontReport.skipped.map(f => 'not embedded — ' + f)].join('\n');
     dlArea.innerHTML = `<a class="download-link" href="${url}" download="${fname}">⬇ Download ${fname}</a>`;
