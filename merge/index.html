@@ -10000,6 +10000,9 @@ computeLayers();
   .tr-row.off{opacity:.55}
   .tr-row .tr-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tr-row .tr-meta{font-size:11px;color:var(--text-dim);white-space:nowrap}
+  .tr-zip{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text-dim);padding:4px 2px 3px;margin-top:2px}
+  .tr-zip .tr-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tr-row.in-zip{margin-left:22px}
   .tr-btn{background:var(--accent-soft);color:var(--text);border:1px solid var(--accent);border-radius:6px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer}
   .tr-btn:disabled{opacity:.5;cursor:default}
   .tr-status{font-size:12px;color:var(--text-dim);margin-top:4px}
@@ -10087,6 +10090,7 @@ computeLayers();
     try {
       const files = [];
       for (let i = 0; i < picked.length; i++) {
+        if (picked[i]._file) { files.push(picked[i]._file); continue; }   /* a file from a ZIP: already here */
         setStatus(`Downloading ${i + 1}/${picked.length}: ${byName(picked[i])}…`);
         const blob = await fetchAttachment(picked[i]);
         files.push(new File([blob], byName(picked[i]), { type: blob.type || picked[i].mimeType || "" }));
@@ -10099,20 +10103,36 @@ computeLayers();
     } finally { $("trLoad").disabled = false; }
   }
 
+  const fmtSize = n => n >= 104858 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+  const fmtDate = d => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
   function renderList(atts) {
     const list = $("trList"); list.innerHTML = "";
-    /* tick the newest PDF; a card with only ZIPs gets its newest ZIP ticked */
-    const newestPdf = atts.find(a => kindOf(a) === "pdf") || atts.find(a => kindOf(a) === "zip");
+    /* Tick the newest PDF attachment. A card whose drawings only come in a
+       ZIP gets the ZIP's biggest PDF ticked (the drawing set, usually —
+       not the purchase order); an un-unpacked ZIP is the last resort. */
+    const zipPdfs = atts.filter(a => a._zip && kindOf(a) === "pdf");
+    const newestPdf = atts.find(a => !a._zip && kindOf(a) === "pdf")
+      || zipPdfs.sort((x, y) => y.bytes - x.bytes)[0]
+      || atts.find(a => kindOf(a) === "zip");
+    let lastZip = null;
     for (const a of atts) {
+      if (a._zip && a._zip !== lastZip) {                       /* heading for the ZIP's files */
+        const h = document.createElement("div"); h.className = "tr-zip";
+        const hn = document.createElement("span"); hn.className = "tr-name"; hn.textContent = "🗜 " + a._zip.name;
+        const hm = document.createElement("span"); hm.className = "tr-meta";
+        hm.textContent = fmtDate(a._zip.date) + (a._zip.bytes ? " · " + fmtSize(a._zip.bytes) : "");
+        h.append(hn, hm); list.appendChild(h);
+      }
+      lastZip = a._zip || null;
       const row = document.createElement("label");
-      row.className = "tr-row";
+      row.className = "tr-row" + (a._zip ? " in-zip" : "");
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = a === newestPdf;
       const name = document.createElement("span"); name.className = "tr-name"; name.textContent = byName(a);
       const meta = document.createElement("span"); meta.className = "tr-meta";
-      const d = new Date(a.date);
-      meta.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
-        (a.bytes ? " · " + (a.bytes >= 104858 ? (a.bytes / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(a.bytes / 1024)) + " KB") : "");
+      meta.textContent = a._zip ? fmtSize(a.bytes)
+        : fmtDate(a.date) + (a.bytes ? " · " + fmtSize(a.bytes) : "");
       const sync = () => row.classList.toggle("off", !cb.checked);
       cb.addEventListener("change", sync); sync();
       row.append(cb, name, meta);
@@ -10123,6 +10143,36 @@ computeLayers();
     $("trLoad").disabled = false;
   }
 
+  // A ZIP on the card is downloaded and unpacked while the list is built, so
+  // each file inside gets its own row and tick box here (under a heading
+  // with the ZIP's name) instead of all landing in the page-order panel.
+  // If a ZIP can't be downloaded or unpacked it keeps one row and loads
+  // whole, as before.
+  async function unpackCardZips(atts, notes) {
+    const rows = [];
+    for (const a of atts) {
+      if (kindOf(a) !== "zip") { rows.push(a); continue; }
+      try {
+        setStatus(`Unzipping ${byName(a)}…`);
+        const blob = await fetchAttachment(a);
+        const skipped = [];
+        const files = await expandZips([new File([blob], byName(a))], skipped);
+        if (!files.length) { notes.push(skipped[0] || `${byName(a)}: nothing usable inside`); continue; }
+        const zip = { name: byName(a), date: a.date, bytes: a.bytes || blob.size };
+        for (const f of files) {
+          const type = detectFileType(new Uint8Array(await f.slice(0, 8).arrayBuffer()));
+          rows.push({ _file: f, _zip: zip, fileName: f.name, date: a.date, bytes: f.size,
+                      mimeType: type === "pdf" ? "application/pdf" : type === "png" ? "image/png" : "image/jpeg" });
+        }
+      } catch (e) {
+        console.error("Unzip card attachment:", e);
+        notes.push(`${byName(a)}: couldn't unpack (${e.message}) — it loads whole`);
+        rows.push(a);
+      }
+    }
+    return rows;
+  }
+
   async function loadCard() {
     setStatus("Reading card…");
     const res = await fetch(`https://api.trello.com/1/cards/${cardId}?fields=name&attachments=true&key=${CFG.APP_KEY}&token=${token}`);
@@ -10131,9 +10181,13 @@ computeLayers();
     $("trTitle").textContent = "Sources from: " + (card.name || "this card");
     const atts = (card.attachments || []).filter(kindOf).sort((a, b) => new Date(b.date) - new Date(a.date));
     if (!atts.length) { setStatus("No PDF, JPG, PNG, or ZIP attachments on this card. Drop files below instead."); return; }
-    renderList(atts);
-    if (atts.some(a => a._cb.checked)) await loadSelected(atts); // auto-load the newest PDF
+    const notes = [];
+    const rows = await unpackCardZips(atts, notes);
+    if (!rows.length) { setStatus(notes.join(" · ") || "Nothing usable on this card. Drop files below instead.", true); return; }
+    renderList(rows);
+    if (rows.some(a => a._cb.checked)) await loadSelected(rows); // auto-load the ticked file
     else setStatus("Tick the files to use, then Load selected.");
+    if (notes.length) setStatus($("trStatus").textContent + "  (" + notes.join(" · ") + ")");
   }
 
   (async () => {
