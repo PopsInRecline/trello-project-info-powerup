@@ -2328,7 +2328,8 @@ function checkTplData() {
    2026 Sign Borders templates (identical there): the box is centered on the
    SIGNATURE word and sits 2 pt above the top of ENGINEER'S.
    The appearance font /Calibri carries the Calibri subset from font_data.js,
-   or Liberation Sans where that subset isn't shipped (the Trello copy).
+   or Carlito (open, same widths as Calibri) in the Trello copy, which may
+   not ship Calibri.
    Acrobat redraws the box in Calibri whenever it is edited (DA/DS/RC). */
 const DATE_BOX = {
   W: 19.47, H: 20.41, LEAD: 7.2, SIZE: 6,
@@ -2366,7 +2367,7 @@ const DATE_BOX = {
       XHeight: 467, StemV: 80, FontWeight: 400
     });
     /* embed it here, so the status bar's "missing fonts embedded" stays about the sources */
-    const prog = typeof FONT_DATA !== 'undefined' && FONT_DATA.fallback && (FONT_DATA.fallback.calibri || FONT_DATA.fallback.sans);
+    const prog = typeof FONT_DATA !== 'undefined' && FONT_DATA.fallback && (FONT_DATA.fallback.calibri || FONT_DATA.fallback.carlito || FONT_DATA.fallback.sans);
     if (prog) {
       const z = b64ToBytes(prog[1]);
       descD.set(PDFName.of('FontFile2'), ctx.register(ctx.stream(z, { Filter: 'FlateDecode', Length: z.length, Length1: prog[0] })));
@@ -2456,11 +2457,11 @@ function embedMissingFonts(doc) {
     const narrow = /narrow|cond|compress|arialn/.test(n);
     const bold   = /bold|black|heavy|semibold|demi|extrabold|ultra|,b$/.test(n) || numOf(desc.get(N('FontWeight'))) >= 600 || (flags & 0x40000);
     const ital   = /italic|oblique|slant|kursiv/.test(n) || numOf(desc.get(N('ItalicAngle'))) !== 0 || (flags & 64);
-    /* real Calibri (subset) where font_data.js ships it — the desktop tool, not the Trello copy */
-    if (/calibri/.test(n) && !/light/.test(n) && FONT_DATA.fallback.calibri) {
+    /* real Calibri (subset) in the desktop tool; Carlito, its open metric twin, in the Trello copy */
+    if (/calibri/.test(n) && !/light/.test(n) && (FONT_DATA.fallback.calibri || FONT_DATA.fallback.carlito)) {
       const b = /bold|,b$/.test(n) || numOf(desc.get(N('FontWeight'))) >= 600;
       const i = /italic|oblique|,i$/.test(n) || numOf(desc.get(N('ItalicAngle'))) !== 0;
-      if (!b && !i) return 'calibri';
+      if (!b && !i) return FONT_DATA.fallback.calibri ? 'calibri' : 'carlito';
     }
     const fam = monoName ? 'mono' : sansName ? (narrow ? 'narrow' : 'sans') : serifName ? 'serif'
               : (flags & 1) ? 'mono' : (flags & 2) ? 'serif' : narrow ? 'narrow' : 'sans';
@@ -4554,7 +4555,13 @@ function parseAddress(raw) {
     // ONLY a known city (no street suffix) is zip + city, not a street —
     // without this the whole string is treated as a street and city is lost.
     const zipCityM = /^(3[2-4]\d{3})\s+(.+)$/.exec(parts[0]);
-    if (zipCityM && !STREET_SUFFIX_RX.test(zipCityM[2]) && canonCity(zipCityM[2])) {
+    // A bare known city ("Fernandina Beach, FL" → "Fernandina Beach") is a
+    // city, not a street; the tail-token loop below never tries the WHOLE
+    // string, so without this the city was lost and the wind estimate idle.
+    if (!/\d/.test(parts[0]) && canonCity(parts[0])) {
+      city = parts[0];
+      street = "";
+    } else if (zipCityM && !STREET_SUFFIX_RX.test(zipCityM[2]) && canonCity(zipCityM[2])) {
       city = zipCityM[2];
       street = "";
     } else {
@@ -9160,6 +9167,9 @@ async function piUpdateWind() {
   } else if (coast && (coast.state === "nogeo" || coast.state === "error")) {
     // Don't leave the previous project's D in place; C is the old default.
     exp = "C"; expWhy = "coast check failed — verify";
+  } else if (!coast && !(q.street && /^\d/.test(q.street))) {
+    // City only (no street number) → no coast check can run. Default C, but warn.
+    exp = "C"; expWhy = "⚠ city only — verify if coastal";
   }
   PI_WIND.sugg = { ...s, exp, expWhy, pointLevel: !!(coast && coast.geo), where: loc.label || q.city, auto: document.getElementById("riskCategory").value === "auto" };
   piApplyWind();
