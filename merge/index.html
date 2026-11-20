@@ -2659,6 +2659,235 @@ async function optimizePdf(doc) {
    must be dropped.  Falls back to raw bytes if deflate fails or the
    compressed form isn't actually smaller.
 ─────────────────────────────────────────────────────────────── */
+/* ── Strip hidden template layers ─────────────────────────────────
+   The merge keeps the WHOLE template on every page and used to only
+   switch the unused layers OFF — ~200 hidden layers that nobody can
+   turn back on (only SRC is in the Layers panel), but that any viewer,
+   RIP or text search ignoring optional content still sees. This deletes
+   the content of every OFF layer and the OFF layers themselves, leaving
+   SRC plus the layers actually showing.
+
+   Port of PDF Print's pdf_ocg_flatten._rewrite_content, hidden part only:
+   - only byte ranges are deleted; everything kept is copied verbatim
+     (re-serializing would corrupt the Identity-H glyph codes the template
+     patches rely on);
+   - inside a hidden layer only MARKING operators go (paths, text shows,
+     Do, sh, inline images). State operators (Tf, Tm, gs, cm, q/Q, BT/ET…)
+     stay, or text after the layer renders in the wrong font/position;
+     clip paths stay too, painted with `n`;
+   - a page's template is several streams and one layer can span them,
+     so a group's streams are lexed as one text and split back.
+   Visible layers (and SRC) are left exactly as they were. */
+const OCStrip = (() => {
+  const set = s => new Set(s.split(' '));
+  const WS = new Set([0, 9, 10, 12, 13, 32]);
+  const DELIM = new Set([...'()<>[]{}/%'].map(c => c.charCodeAt(0)));
+  const NUMST = new Set([...'+-.0123456789'].map(c => c.charCodeAt(0)));
+  const PATH_BUILD = set('m l c v y h re'), PATH_CLIP = set('W W*'),
+        PATH_PAINT = set('S s f F f* B B* b b* n'), SHOW = set('Tj TJ Do sh'),
+        MC = set('BDC BMC EMC MP DP');
+
+  const skipWs = (d, i) => {
+    const n = d.length;
+    while (i < n) {
+      const c = d.charCodeAt(i);
+      if (WS.has(c)) i++;
+      else if (c === 37) { while (i < n && d.charCodeAt(i) !== 10 && d.charCodeAt(i) !== 13) i++; }
+      else break;
+    }
+    return i;
+  };
+  const scanRegular = (d, i) => {
+    while (i < d.length) { const c = d.charCodeAt(i); if (WS.has(c) || DELIM.has(c)) break; i++; }
+    return i;
+  };
+  const scanLiteral = (d, i) => {             /* (...) with escapes + nesting */
+    let depth = 1; i++;
+    while (i < d.length) {
+      const c = d.charCodeAt(i);
+      if (c === 92) { i += 2; continue; }
+      if (c === 40) depth++;
+      else if (c === 41 && --depth === 0) return i + 1;
+      i++;
+    }
+    return d.length;
+  };
+  const scanGroup = (d, i, closer) => {       /* [...] / <<...>> token by token */
+    i += closer.length;
+    while (i < d.length) {
+      i = skipWs(d, i);
+      if (i >= d.length) break;
+      if (d.startsWith(closer, i)) return i + closer.length;
+      i = scanToken(d, i)[2];
+    }
+    return d.length;
+  };
+  function scanToken(d, i) {                  /* → [kind 'obj'|'op', start, end] */
+    const c = d.charCodeAt(i);
+    if (c === 40) return ['obj', i, scanLiteral(d, i)];
+    if (c === 60) {
+      if (d.charCodeAt(i + 1) === 60) return ['obj', i, scanGroup(d, i, '>>')];
+      const e = d.indexOf('>', i); return ['obj', i, e < 0 ? d.length : e + 1];
+    }
+    if (c === 91) return ['obj', i, scanGroup(d, i, ']')];
+    if (c === 47) return ['obj', i, scanRegular(d, i + 1)];
+    if (DELIM.has(c)) return ['obj', i, i + 1];
+    let e = scanRegular(d, i); if (e === i) e = i + 1;
+    return [NUMST.has(c) ? 'obj' : 'op', i, e];
+  }
+  const skipInlineImage = (d, i) => {         /* from just after BI → past EI */
+    const n = d.length;
+    while (i < n) {
+      i = skipWs(d, i); if (i >= n) return n;
+      const [k, s, e] = scanToken(d, i); i = e;
+      if (k === 'op' && d.slice(s, e) === 'ID') break;
+    }
+    i++;
+    while (i < n) {
+      const k = d.indexOf('EI', i); if (k < 0) return n;
+      const a = k + 2 < n ? d.charCodeAt(k + 2) : -1;
+      if (WS.has(d.charCodeAt(k - 1)) && (a < 0 || WS.has(a) || DELIM.has(a))) return k + 2;
+      i = k + 2;
+    }
+    return n;
+  };
+  const nameOf = t => t.replace(/#([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+
+  /* d: latin-1 text. hiddenProp(name) → true for an /OC tag on an OFF layer;
+     hiddenXObj(name) → true for an XObject whose own /OC is OFF.
+     Returns { cuts: [[start, end, replacement]], blocks }. */
+  function plan(d, hiddenProp, hiddenXObj) {
+    const cuts = [];
+    let pending = [], drop = 0, pathFrom = null, pathClips = false, blocks = 0;
+    const cut = (s, e, r = '') => {
+      r = ' ' + r + ' ';                      /* never glue two tokens together */
+      const L = cuts[cuts.length - 1];
+      if (L && s < L[1]) { L[1] = Math.max(e, L[1]); L[2] += r; } else cuts.push([s, e, r]);
+    };
+    const opnd = k => d.slice(pending[pending.length - k][0], pending[pending.length - k][1]);
+    let i = 0;
+    for (;;) {
+      i = skipWs(d, i); if (i >= d.length) break;
+      const [kind, start, end] = scanToken(d, i); i = end;
+      if (kind === 'obj') { pending.push([start, end]); continue; }
+      const op = d.slice(start, end), group = pending.length ? pending[0][0] : start;
+
+      if (op === 'BI') { i = skipInlineImage(d, end); if (drop) cut(group, i); pending = []; continue; }
+
+      if (drop) {
+        if (PATH_BUILD.has(op) || PATH_CLIP.has(op)) {
+          if (pathFrom === null) pathFrom = group;
+          pathClips = pathClips || PATH_CLIP.has(op);
+        } else if (PATH_PAINT.has(op)) {
+          if (pathClips) { if (op !== 'n') cut(start, end, 'n'); }   /* clip still needed */
+          else cut(pathFrom !== null ? pathFrom : group, end);
+          pathFrom = null; pathClips = false;
+        } else if (SHOW.has(op)) cut(group, end);
+        else if (op === "'") cut(group, end, 'T*');                    /* keep the line advance */
+        else if (op === '"') cut(group, end, pending.length >= 3 ? `${opnd(3)} Tw ${opnd(2)} Tc T*` : 'T*');
+        else if (MC.has(op)) {
+          if (op === 'BDC' || op === 'BMC') drop++; else if (op === 'EMC') drop--;
+          cut(group, end);
+        }
+        /* anything else is a state operator: left exactly as it is */
+        pending = []; continue;
+      }
+
+      if (op === 'BDC' && pending.length >= 2 && opnd(2) === '/OC') {
+        const t = opnd(1);
+        if (t[0] === '/' && hiddenProp(nameOf(t.slice(1)))) {
+          drop = 1; pathFrom = null; pathClips = false; blocks++;
+          cut(group, end);
+        }
+      } else if (op === 'Do' && pending.length && hiddenXObj && opnd(1)[0] === '/' && hiddenXObj(nameOf(opnd(1).slice(1)))) {
+        cut(group, end);
+      }
+      pending = [];
+    }
+    return { cuts, blocks };
+  }
+
+  /* Decode a stream to latin-1 text; null if it uses a filter we can't undo. */
+  function readStream(so) {
+    const { PDFName, PDFArray } = PDFLib;
+    let f = so.dict.get(PDFName.of('Filter'));
+    if (f instanceof PDFArray) { if (f.size() > 1) return null; f = f.get(0); }
+    let b = so.contents;
+    if (f) {
+      if (f.toString() !== '/FlateDecode' || so.dict.get(PDFName.of('DecodeParms'))) return null;
+      try { b = pako.inflate(b); } catch (e) { return null; }
+    }
+    let t = ''; for (let k = 0; k < b.length; k += 8192) t += String.fromCharCode.apply(null, b.subarray(k, k + 8192));
+    return t;
+  }
+
+  /* Rewrite one group of streams (drawn back to back) as a unit. */
+  function rewriteGroup(ctx, refs, hiddenProp, hiddenXObj) {
+    const objs = refs.map(r => r instanceof PDFLib.PDFRef ? ctx.lookup(r) : r);
+    const texts = objs.map(o => o && o.contents ? readStream(o) : null);
+    if (texts.some(t => t == null)) { console.warn('Layer strip: unreadable template stream, group left as is'); return 0; }
+    const J = texts.join('\n'), bounds = [];
+    let p = 0; for (const t of texts) { bounds.push([p, p + t.length]); p += t.length + 1; }
+    const { cuts, blocks } = plan(J, hiddenProp, hiddenXObj);
+    if (!cuts.length) return 0;
+    const parts = texts.map(() => []);
+    const emit = (x, y) => bounds.forEach(([a, b], k) => { const lo = Math.max(x, a), hi = Math.min(y, b); if (lo < hi) parts[k].push(J.slice(lo, hi)); });
+    const kAt = s => { const k = bounds.findIndex(([, b]) => s < b); return k < 0 ? bounds.length - 1 : k; };
+    let prev = 0;
+    for (const [s, e, r] of cuts) { emit(prev, s); parts[kAt(s)].push(r); prev = e; }
+    emit(prev, J.length);
+    objs.forEach((o, k) => { const t = parts[k].join(''); if (t !== texts[k]) writePatchedStream(o, o.dict, t); });
+    return blocks;
+  }
+
+  /* groups: arrays of template content-stream refs (one per page range).
+     resDict: the template page's shared Resources. offRefs: PDFArray of the
+     OFF OCG refs. skipXObj(name): XObjects to leave alone (the source pages). */
+  function strip(ctx, cat, resDict, groups, offRefs, skipXObj) {
+    const { PDFName, PDFDict, PDFRef, PDFArray } = PDFLib;
+    const L = o => o instanceof PDFRef ? ctx.lookup(o) : o;
+    const off = new Set(offRefs.asArray().map(r => r.toString()));
+    if (!off.size) return { layers: 0, blocks: 0 };
+    const isOff = v => v instanceof PDFRef && off.has(v.toString());
+    let blocks = 0;
+
+    const doResources = (res, contentGroups, seen) => {
+      const props = L(res && res.get(PDFName.of('Properties')));
+      const xo = L(res && res.get(PDFName.of('XObject')));
+      const hiddenProp = nm => props instanceof PDFDict && isOff(props.get(PDFName.of(nm)));
+      const hiddenXObj = nm => {
+        const x = xo instanceof PDFDict && L(xo.get(PDFName.of(nm)));
+        return x instanceof PDFLib.PDFRawStream && isOff(x.dict.get(PDFName.of('OC')));
+      };
+      for (const g of contentGroups) blocks += rewriteGroup(ctx, g, hiddenProp, hiddenXObj);
+      if (xo instanceof PDFDict) for (const [k, v] of [...xo.entries()]) {
+        const nm = k.asString().slice(1); if (skipXObj(nm)) continue;
+        const x = L(v);
+        if (!(x instanceof PDFLib.PDFRawStream)) continue;
+        if (isOff(x.dict.get(PDFName.of('OC')))) { xo.delete(k); continue; }   /* its Do calls are gone */
+        const key = v.toString(); if (seen.has(key)) continue; seen.add(key);
+        if (String(x.dict.get(PDFName.of('Subtype'))) !== '/Form') continue;
+        doResources(L(x.dict.get(PDFName.of('Resources'))) || res, [[v]], seen);
+      }
+      if (props instanceof PDFDict) for (const [k, v] of [...props.entries()]) if (isOff(v)) props.delete(k);
+    };
+    doResources(resDict, groups, new Set());
+
+    /* Drop the OFF layers from the catalog — the sweep in optimizePdf then
+       removes the OCG objects themselves. */
+    const ocp = L(cat.get(PDFName.of('OCProperties')));
+    if (ocp instanceof PDFDict) {
+      let ocgs = L(ocp.get(PDFName.of('OCGs')));
+      if (ocgs instanceof PDFArray) ocp.set(PDFName.of('OCGs'), ctx.obj(ocgs.asArray().filter(r => !isOff(r))));
+      const d = L(ocp.get(PDFName.of('D')));
+      if (d instanceof PDFDict) d.delete(PDFName.of('OFF'));
+    }
+    return { layers: off.size, blocks };
+  }
+
+  return { strip, plan };
+})();
+
 function writePatchedStream(streamObj, dict, text) {
   const raw = new Uint8Array(text.length);
   for (let b = 0; b < text.length; b++) raw[b] = text.charCodeAt(b);
@@ -3441,6 +3670,15 @@ async function doMerge() {
         dConfig.set(PDFName.of('Order'), ctx.obj([srcOcgRef]));
         dConfig.set(PDFName.of('RBGroups'), ctx.obj([]));
         console.log(`OCG: ${onArr.size()} ON, ${offArr.size()} OFF, SRC in panel`);
+
+        /* Delete the OFF layers' content and the layers themselves, so the
+           output carries only SRC + the layers that are showing. */
+        status.textContent = "Removing hidden layers…";
+        const groups = [...new Set([tplStreamRefs, ...streamsByG.values()])];
+        try {
+          const st = OCStrip.strip(ctx, cat, resDict, groups, offArr, nm => /^SrcPg\d+$/.test(nm));
+          console.log(`Layer strip: ${st.layers} hidden layers removed (${st.blocks} content blocks)`);
+        } catch (e) { console.warn('Layer strip skipped (hidden layers stay, switched off):', e); }
       }
     }
 
