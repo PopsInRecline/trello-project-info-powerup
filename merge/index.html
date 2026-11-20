@@ -876,10 +876,16 @@ function updateP2Visibility(){
    streams and its own copies of the template layers (see doMerge). */
 const LG = {
   groups: [{ id: 0, s: null }], active: 0, nextId: 1,
-  COLORS: ['#4a6cf7', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6', '#06b6d4', '#ef4444', '#84cc16'],
+  /* a range is colored by its sign type (two ranges of one type share a color; the letter tells them apart) */
+  TYPE_COLORS: { 'Wall sign': '#3b82f6', 'Monument at grade': '#f97316', '15-ft Pylon above grade': '#f87171',
+    '30-ft Pylon above grade': '#b91c1c', 'Interior': '#22c55e' },
   idx(id) { return this.groups.findIndex(g => g.id === id); },
   letter(id) { return String.fromCharCode(65 + Math.max(0, this.idx(id))); },
-  color(id) { return this.COLORS[Math.max(0, this.idx(id)) % this.COLORS.length]; },
+  color(id) {
+    let st = '';
+    try { const s = this.settingsOf(id); st = s ? s.st : ''; } catch (e) { /* card not ready */ }
+    return this.TYPE_COLORS[st] || '#8b93a7';
+  },
   multi() { return this.groups.length > 1; },
   /* the range a page belongs to (an unknown/removed range → A) */
   gidOf(e) { return e && e.lg != null && this.idx(e.lg) >= 0 ? e.lg : this.groups[0].id; },
@@ -994,6 +1000,8 @@ const LG = {
   shortType(st) { return ({ 'Wall sign': 'Wall', 'Monument at grade': 'Monument', '15-ft Pylon above grade': '15′ Pylon', '30-ft Pylon above grade': '30′ Pylon', 'Interior': 'Interior' })[st] || st; },
   render() {
     const bar = document.getElementById('lgBar'); if (!bar) return;
+    /* page chips follow a range's sign type without a full chip re-render */
+    document.querySelectorAll('.lg-chip[data-lg]').forEach(c => { c.style.background = this.color(+c.dataset.lg); });
     const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
     if (!this.multi()) {
       bar.innerHTML = `<button type="button" class="lg-add" onclick="LG.add()" title="Give some pages different layer settings (e.g. a monument page in a wall-sign drawing)">＋ Different settings for some pages</button>`;
@@ -1517,7 +1525,7 @@ function renderComplexityUI() {
       `<span class="cp-grip">⠿</span>` +
       `<span class="cp-icon">${icon}</span>` +
       `<span class="cp-lbl">${lbl}</span>` +
-      (LG.multi() ? `<span class="lg-chip" style="background:${LG.color(LG.gidOf(e))}" title="Layer Settings range ${LG.letter(LG.gidOf(e))}">${LG.letter(LG.gidOf(e))}</span>` : '') +
+      (LG.multi() ? `<span class="lg-chip" data-lg="${LG.gidOf(e)}" style="background:${LG.color(LG.gidOf(e))}" title="Layer Settings range ${LG.letter(LG.gidOf(e))}">${LG.letter(LG.gidOf(e))}</span>` : '') +
       ((multi || isPair) ? `<span class="cp-src">${multi ? srcTag : 'p' + parts.map(p => p.srcPage + 1).join('+')}</span>` : '') +
       `<span class="cp-mode">${mode}</span>` +
       `<span class="cp-ops">${ops}</span>` +
